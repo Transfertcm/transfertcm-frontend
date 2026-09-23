@@ -4,6 +4,7 @@
   import { toast } from '$lib/stores/toast.svelte'
   import Badge from '$lib/components/ui/Badge.svelte'
   import { t, translate } from '$lib/stores/locale'
+  import { formatOrderCode } from '$lib/reference'
 
   let commandes = $state<any[]>([])
   let meta = $state<any>(null)
@@ -298,7 +299,7 @@
           <!-- Code -->
           <div class="lg:col-span-1">
             <a href="/admin/commandes/{cmd.id}" class="text-xs font-mono text-orange-600 hover:text-orange-700 font-semibold">
-              #{(cmd.orderCode ?? cmd.id ?? '').toString().slice(-6)}
+              {formatOrderCode(cmd.orderCode, cmd.order_code, cmd.id)}
             </a>
           </div>
           <!-- Client -->

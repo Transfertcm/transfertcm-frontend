@@ -167,7 +167,7 @@
               <div class="flex items-center gap-3">
                 <div
                   class="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
-                  style="background: linear-gradient(135deg, #f97316 0%, #fbbf24 100%)"
+                  style="background: linear-gradient(135deg, #007A5E 0%, #00A878 100%)"
                 >
                   {admin.initials}
                 </div>

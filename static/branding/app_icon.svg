@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Icone de l'app : double fleche de transfert sur le vert de marque.
+       Le meme signe que l'ecran de connexion (LucideIcons.arrowLeftRight). -->
+  <defs>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#007A5E"/>
+      <stop offset="1" stop-color="#00A878"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1024" height="1024" fill="url(#brand)"/>
+
+  <!-- Traits arrondis, a la maniere de Lucide : bouts et jointures ronds,
+       epaisseur constante. -->
+  <g fill="none" stroke="#FFFFFF" stroke-width="58"
+     stroke-linecap="round" stroke-linejoin="round">
+    <!-- Fleche vers la droite, en haut -->
+    <path d="M330 420 H694"/>
+    <path d="M610 336 L694 420 L610 504"/>
+    <!-- Fleche vers la gauche, en bas -->
+    <path d="M694 604 H330"/>
+    <path d="M414 520 L330 604 L414 688"/>
+  </g>
+</svg>

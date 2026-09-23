@@ -33,12 +33,12 @@
   <div class="flex items-start justify-between">
     <div class="flex-1 min-w-0">
       <p class="text-xs font-semibold text-slate-400 uppercase tracking-widest">{titre}</p>
-      <p class="font-bold text-2xl mt-2 leading-none text-slate-900">{valeur}</p>
+      <p class="font-bold text-2xl mt-2 leading-none text-slate-900 animate-count-up">{valeur}</p>
       {#if sousTitre}
         <p class="text-xs text-slate-400 mt-1.5">{sousTitre}</p>
       {/if}
       {#if tendance}
-        <div class="flex items-center gap-1 mt-2">
+        <div class="flex items-center gap-1 mt-2 animate-fade-in" style="animation-delay:.18s">
           <span
             class="material-symbols-outlined icon-filled {tendanceHausse ? 'text-emerald-500' : 'text-red-500'}"
             style="font-size: 14px;"
@@ -52,7 +52,7 @@
       {/if}
     </div>
     <div
-      class="hidden lg:flex w-11 h-11 rounded-xl {c.bg} border {c.bordure} items-center justify-center shrink-0 ml-3"
+      class="hidden lg:flex w-11 h-11 rounded-xl {c.bg} border {c.bordure} items-center justify-center shrink-0 ml-3 stat-icon"
     >
       <span class="material-symbols-outlined {c.icone} icon-filled" style="font-size: 22px;">{icone}</span>
     </div>

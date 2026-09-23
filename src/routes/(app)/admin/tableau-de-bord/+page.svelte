@@ -92,7 +92,7 @@
 
 <!-- Cartes de statistiques -->
 {#if chargement}
-  <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+  <div class="grid grid-cols-2 lg:grid-cols-4 stagger gap-3 mb-6">
     {#each Array(8) as _}
       <div class="skeleton h-24 rounded-xl"></div>
     {/each}
@@ -103,7 +103,7 @@
   {@const paiements = stats?.payments ?? {}}
 
   {@const labelPeriode = periode === 'semaine' ? 'cette semaine' : periode === 'mois' ? 'ce mois' : "aujourd'hui"}
-  <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+  <div class="grid grid-cols-2 lg:grid-cols-4 stagger gap-3 mb-4">
     <StatCard
       titre="Commandes {labelPeriode}"
       valeur={ordres?.totals?.total ?? 0}
@@ -130,7 +130,7 @@
     />
   </div>
 
-  <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+  <div class="grid grid-cols-2 lg:grid-cols-4 stagger gap-3 mb-6">
     {#each (ordres?.byStatus ?? []) as s}
       <StatCard
         titre={s.status?.replace(/_/g, ' ') ?? '—'}
@@ -155,7 +155,7 @@
 {/if}
 
 <!-- Contenu principal : commandes + cabines -->
-<div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+<div class="grid grid-cols-1 lg:grid-cols-3 stagger gap-5">
 
   <!-- Commandes récentes -->
   <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-100 overflow-hidden card-shadow">
@@ -199,7 +199,7 @@
             <div class="lg:col-span-3 flex items-center gap-2 min-w-0">
               <div
                 class="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
-                style="background: linear-gradient(135deg, #f97316 0%, #fbbf24 100%)"
+                style="background: linear-gradient(135deg, #007A5E 0%, #00A878 100%)"
               >
                 {(cmd.customerPhone ?? '?').slice(-2)}
               </div>

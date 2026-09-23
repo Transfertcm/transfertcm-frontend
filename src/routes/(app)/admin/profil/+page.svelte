@@ -106,7 +106,7 @@
 </div>
 
 {#if chargement}
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+  <div class="grid grid-cols-1 lg:grid-cols-3 stagger gap-5">
     <div class="lg:col-span-2 space-y-5">
       <div class="skeleton h-64 rounded-2xl"></div>
       <div class="skeleton h-48 rounded-2xl"></div>
@@ -114,7 +114,7 @@
     <div class="skeleton h-64 rounded-2xl"></div>
   </div>
 {:else if profil}
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+  <div class="grid grid-cols-1 lg:grid-cols-3 stagger gap-5">
 
     <!-- Colonne principale -->
     <div class="lg:col-span-2 space-y-5">
@@ -131,7 +131,7 @@
           <!-- Avatar -->
           <div class="flex items-center gap-4 mb-2">
             <div class="w-16 h-16 rounded-2xl flex items-center justify-center text-white text-xl font-black shrink-0"
-              style="background:linear-gradient(135deg,#f97316,#fbbf24)">
+              style="background:linear-gradient(135deg, #007A5E 0%, #00A878 100%)">
               {initiales(profil.profile?.fullName ?? profil.fullName ?? null)}
             </div>
             <div>

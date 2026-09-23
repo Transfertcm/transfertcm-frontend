@@ -179,7 +179,7 @@
 </div>
 
 <!-- Statistiques rapides -->
-<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+<div class="grid grid-cols-2 md:grid-cols-4 stagger gap-4 mb-5">
   {#each [
     { label: 'Total actifs', val: packages.filter(p => p.isActive).length, icon: 'inventory_2', color: 'orange' },
     { label: 'MTN actifs',   val: countMtn,    icon: 'cell_tower', color: 'amber' },

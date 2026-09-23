@@ -4,6 +4,7 @@
   import { toast } from '$lib/stores/toast.svelte'
   import Badge from '$lib/components/ui/Badge.svelte'
   import { t, translate } from '$lib/stores/locale'
+  import { formatOrderCode } from '$lib/reference'
 
   let commandes = $state<any[]>([])
   let chargement = $state(true)
@@ -126,7 +127,7 @@
         {filtreStatut === s.val
           ? 'text-white border-orange-500'
           : 'bg-white text-slate-600 border-slate-200 hover:border-orange-300'}"
-      style={filtreStatut === s.val ? 'background: linear-gradient(135deg, #f97316, #fbbf24); border-color: transparent' : ''}
+      style={filtreStatut === s.val ? 'background: linear-gradient(135deg, #007A5E 0%, #00A878 100%); border-color: transparent' : ''}
     >
       {$t(s.labelKey)}
     </button>
@@ -171,7 +172,7 @@
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2 flex-wrap mb-1">
                 <span class="font-mono text-xs font-bold text-orange-600">
-                  #{(cmd.orderCode ?? cmd.order_code ?? cmd.id ?? '').toString().slice(-8)}
+                  {formatOrderCode(cmd.orderCode, cmd.order_code, cmd.id)}
                 </span>
                 <span
                   class="text-xs font-bold px-2 py-0.5 rounded-full uppercase"
@@ -187,7 +188,7 @@
                   </span>
                 {/if}
               </div>
-              <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-2">
+              <div class="grid grid-cols-2 sm:grid-cols-4 stagger gap-3 mt-2">
                 <div>
                   <p class="text-xs text-slate-400">{$t('cabin.orders.col_client')}</p>
                   <p class="text-sm font-semibold text-slate-800">

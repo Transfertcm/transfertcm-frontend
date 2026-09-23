@@ -2,6 +2,8 @@
   import { page } from '$app/stores'
   import { onMount, onDestroy } from 'svelte'
   import { goto } from '$app/navigation'
+  import { slide } from 'svelte/transition'
+  import { cubicOut } from 'svelte/easing'
   import { auth } from '$lib/stores/auth.svelte'
   import { toast } from '$lib/stores/toast.svelte'
   import { t, translate } from '$lib/stores/locale'
@@ -20,9 +22,12 @@
   let dernierChemin = $state<string | null>(null)
   $effect(() => {
     const chemin = $page.url.pathname
-    if (dernierChemin !== null && chemin !== dernierChemin) {
-      groupeOuvert = null
-      if (estMobile && !reduit) reduit = true
+    if (chemin !== dernierChemin) {
+      // Le groupe de la page courante reste déplié : on doit pouvoir passer
+      // d'un sous-item à l'autre sans rouvrir le menu à chaque fois.
+      const porteur = groupes.find(g => g.items.some(i => estActif(i.href)))
+      if (porteur) groupeOuvert = porteur.key
+      if (dernierChemin !== null && estMobile && !reduit) reduit = true
     }
     dernierChemin = chemin
   })
@@ -76,7 +81,7 @@
       key: 'operations',
       icone: 'hub',
       label: 'Opérations',
-      couleur: '#f97316',
+      couleur: '#007A5E',
       roles: ['super_admin','admin','controleur_cabine','chef_agents_promo'],
       items: [
         { href: '/admin/commandes',    icone: 'receipt_long', label: 'Commandes',     desc: 'Transferts clients en cours',    roles: ['super_admin','admin','controleur_cabine'] },
@@ -133,19 +138,23 @@
   }
 
   function toggleGroupe(key: string) {
+    // En mode réduit le sous-menu n'a pas la place de s'afficher : on déplie
+    // d'abord la barre, sinon le clic n'aurait aucun effet visible.
+    if (reduit && !estMobile) {
+      reduit = false
+      groupeOuvert = key
+      return
+    }
     groupeOuvert = groupeOuvert === key ? null : key
-  }
-
-  function naviguer(href: string) {
-    groupeOuvert = null
-    goto(href)
   }
 
   async function seDeconnecter() {
     try { await api.post('/auth/logout') } catch {}
     auth.logout()
+    // Le message est affiché une fois la navigation faite : émis avant,
+    // il se monte pendant le changement de page et s'affiche à moitié.
+    await goto('/login')
     toast.info(translate('common.logout'), translate('toast.goodbye'))
-    goto('/login')
   }
 
   function initiales(nom: string | null) {
@@ -153,67 +162,7 @@
     return nom.split(' ').map(p => p[0]).join('').toUpperCase().slice(0, 2)
   }
 
-  const groupeActuel = $derived(groupes.find(g => g.key === groupeOuvert) ?? null)
 </script>
-
-<!-- Backdrop -->
-{#if groupeOuvert}
-  <div
-    class="fixed inset-0 z-30  backdrop-white/30 backdrop-blur-sm"
-    onclick={() => groupeOuvert = null}
-    role="presentation"
-  ></div>
-{/if}
-
-<!-- Panneau sous-menu -->
-{#if groupeActuel}
-  <div
-    class="fixed z-50 top-1/2 -translate-y-1/2 animate-fade-in-up"
-    style="left: 250px; width: 50vw; height: 60%;"
-  >
-    <div class="bg-white rounded-2xl overflow-hidden" style="box-shadow: 0 20px 60px rgba(0,0,0,0.14), 0 4px 16px rgba(0,0,0,0.08);">
-      <!-- En-tête -->
-      <div class="px-5 py-3.5 flex items-center justify-between border-b border-slate-100">
-        <p class="font-bold text-slate-900 text-sm">{groupeActuel.label}</p>
-        <button
-          onclick={() => groupeOuvert = null}
-          class="w-7 h-7 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400 transition-colors"
-        >
-          <span class="material-symbols-outlined" style="font-size: 16px;">close</span>
-        </button>
-      </div>
-
-      <!-- Liste de liens -->
-      <div class="p-2">
-        {#each groupeActuel.items as item}
-          <button
-            onclick={() => naviguer(item.href)}
-            class="w-full text-left flex items-center justify-between px-3 py-3 rounded-xl transition-all duration-150 hover:bg-slate-50 group"
-            class:bg-slate-50={estActif(item.href)}
-          >
-            <div>
-              <div class="flex items-center gap-2">
-                <p class="text-sm font-semibold"
-                  style="color: {estActif(item.href) ? groupeActuel.couleur : '#1e293b'}">
-                  {item.label}
-                </p>
-                {#if (item.badge ?? 0) > 0}
-                  <span class="bg-orange-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">
-                    {(item.badge ?? 0) > 99 ? '99+' : item.badge}
-                  </span>
-                {/if}
-              </div>
-              <p class="text-xs text-slate-400 mt-0.5">{item.desc}</p>
-            </div>
-            {#if estActif(item.href)}
-              <span class="w-1.5 h-1.5 rounded-full shrink-0" style="background: {groupeActuel.couleur};"></span>
-            {/if}
-          </button>
-        {/each}
-      </div>
-    </div>
-  </div>
-{/if}
 
 <!-- Sidebar -->
 <aside
@@ -229,7 +178,7 @@
       <div class="flex items-center gap-2.5">
         <div
           class="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-          style="background: linear-gradient(135deg, #f97316 0%, #fbbf24 100%)"
+          style="background: linear-gradient(135deg, #007A5E 0%, #00A878 100%)"
         >
           <span class="material-symbols-outlined icon-filled text-white" style="font-size: 20px;">swap_horiz</span>
         </div>
@@ -251,7 +200,7 @@
     {:else}
       <div
         class="w-9 h-9 rounded-xl flex items-center justify-center"
-        style="background: linear-gradient(135deg, #f97316 0%, #fbbf24 100%)"
+        style="background: linear-gradient(135deg, #007A5E 0%, #00A878 100%)"
       >
         <span class="material-symbols-outlined icon-filled text-white" style="font-size: 20px;">swap_horiz</span>
       </div>
@@ -283,32 +232,61 @@
 
     <!-- Groupes -->
     {#each groupes as groupe}
-      <button
-        type="button"
-        onclick={() => toggleGroupe(groupe.key)}
-        class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all relative text-left"
-        class:text-slate-900={estGroupeActif(groupe) || groupeOuvert === groupe.key}
-        class:font-semibold={estGroupeActif(groupe) || groupeOuvert === groupe.key}
-        class:text-slate-600={!estGroupeActif(groupe) && groupeOuvert !== groupe.key}
-        style={groupeOuvert === groupe.key
-          ? `background: ${groupe.couleur}12; color: ${groupe.couleur};`
-          : estGroupeActif(groupe)
-            ? `background: ${groupe.couleur}10;`
-            : ''}
-        title={reduit && !estMobile ? groupe.label : ''}
-      >
-        <!-- Point actif -->
-        {#if estGroupeActif(groupe) && (!groupeOuvert || groupeOuvert !== groupe.key)}
-          <span class="absolute left-1.5 top-1/2 -translate-y-1/2 w-1 h-4 rounded-full"
-            style="background: {groupe.couleur};"></span>
-        {/if}
+      {@const ouvert = groupeOuvert === groupe.key}
+      <div>
+        <button
+          type="button"
+          onclick={() => toggleGroupe(groupe.key)}
+          class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all relative text-left"
+          class:text-slate-900={estGroupeActif(groupe) || ouvert}
+          class:font-semibold={estGroupeActif(groupe) || ouvert}
+          class:text-slate-600={!estGroupeActif(groupe) && !ouvert}
+          style={estGroupeActif(groupe) ? `background: ${groupe.couleur}10;` : ''}
+          title={reduit && !estMobile ? groupe.label : ''}
+          aria-expanded={ouvert}
+        >
+          {#if estGroupeActif(groupe)}
+            <span class="absolute left-1.5 top-1/2 -translate-y-1/2 w-1 h-4 rounded-full"
+              style="background: {groupe.couleur};"></span>
+          {/if}
 
-        <span class="material-symbols-outlined icon-filled shrink-0" style="font-size: 20px; {groupeOuvert === groupe.key ? `color: ${groupe.couleur};` : ''}">{groupe.icone}</span>
+          <span class="material-symbols-outlined icon-filled shrink-0" style="font-size: 20px; {estGroupeActif(groupe) ? `color: ${groupe.couleur};` : ''}">{groupe.icone}</span>
 
-        {#if !reduit || estMobile}
-          <span class="text-sm flex-1 whitespace-nowrap">{groupe.label}</span>
+          {#if !reduit || estMobile}
+            <span class="text-sm flex-1 whitespace-nowrap">{groupe.label}</span>
+            <span
+              class="material-symbols-outlined shrink-0 text-slate-400 transition-transform duration-200"
+              style="font-size: 18px; {ouvert ? 'transform: rotate(180deg);' : ''}"
+            >expand_more</span>
+          {/if}
+        </button>
+
+        <!-- Sous-menu déplié dans la barre : il reste visible pendant qu'on
+             passe d'une page à l'autre. -->
+        {#if ouvert && (!reduit || estMobile)}
+          <div class="mt-0.5 mb-1 ml-[1.35rem] pl-3 border-l border-slate-200 space-y-0.5" transition:slide={{ duration: 200, easing: cubicOut }}>
+            {#each groupe.items as item}
+              {@const actif = estActif(item.href)}
+              <a
+                href={item.href}
+                class="block px-3 py-2 rounded-lg transition-all hover:bg-slate-50"
+                style={actif ? `background: ${groupe.couleur}12;` : ''}
+              >
+                <div class="flex items-center gap-2">
+                  <span class="text-[13px] font-medium truncate"
+                    style="color: {actif ? groupe.couleur : '#475569'}">{item.label}</span>
+                  {#if (item.badge ?? 0) > 0}
+                    <span class="text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0"
+                      style="background: {groupe.couleur}">
+                      {(item.badge ?? 0) > 99 ? '99+' : item.badge}
+                    </span>
+                  {/if}
+                </div>
+              </a>
+            {/each}
+          </div>
         {/if}
-      </button>
+      </div>
     {/each}
   </nav>
 
@@ -321,7 +299,7 @@
     >
       <div
         class="w-8 h-8 rounded-full shrink-0 flex items-center justify-center text-white text-xs font-bold"
-        style="background: linear-gradient(135deg, #f97316 0%, #fbbf24 100%)"
+        style="background: linear-gradient(135deg, #007A5E 0%, #00A878 100%)"
       >
         {initiales(auth.user?.fullName ?? null)}
       </div>
@@ -332,6 +310,17 @@
           </p>
           <p class="text-slate-400 text-xs mt-0.5 capitalize">{auth.user?.role?.replace('_', ' ') ?? ''}</p>
         </div>
+      {/if}
+    </a>
+
+    <a
+      href="/"
+      class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-all"
+      title={reduit && !estMobile ? 'Voir le site' : ''}
+    >
+      <span class="material-symbols-outlined shrink-0" style="font-size: 20px;">public</span>
+      {#if !reduit || estMobile}
+        <span class="text-sm font-medium">Voir le site</span>
       {/if}
     </a>
 

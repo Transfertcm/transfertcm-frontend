@@ -106,7 +106,7 @@
   <!-- Identité -->
   <div class="bg-white rounded-2xl border border-slate-100 card-shadow p-5 mb-5 flex items-center gap-4">
     <div class="w-14 h-14 rounded-2xl flex items-center justify-center text-white text-xl font-black shrink-0"
-      style="background: linear-gradient(135deg, #f97316 0%, #fbbf24 100%)">
+      style="background: linear-gradient(135deg, #007A5E 0%, #00A878 100%)">
       {(profil?.name ?? '?')[0]?.toUpperCase()}
     </div>
     <div class="flex-1 min-w-0">
@@ -125,7 +125,7 @@
     </div>
   </div>
 
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+  <div class="grid grid-cols-1 lg:grid-cols-2 stagger gap-5">
 
     <!-- Contact -->
     <div class="bg-white rounded-2xl border border-slate-100 card-shadow overflow-hidden">

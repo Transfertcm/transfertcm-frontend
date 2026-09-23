@@ -3,7 +3,7 @@ import { cabinAuth } from '$lib/stores/cabin-auth.svelte'
 import { toast } from '$lib/stores/toast.svelte'
 import { goto } from '$app/navigation'
 
-export const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3334/api/v1'
+export const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3333/api/v1'
 
 const apiCabin = axios.create({
   baseURL: BASE_URL,
@@ -33,15 +33,25 @@ apiCabin.interceptors.response.use(
     if (status === 401) {
       if (!url.includes('notifications')) {
         cabinAuth.logout()
+        // Le message est remis à l'écran de connexion : un toast émis pendant
+        // la navigation disparaît avec la page qu'il quitte.
+        sessionStorage.setItem('tcm_auth_error', 'Session expirée — veuillez vous reconnecter.')
         goto('/login')
-        toast.erreur('Session expirée', 'Veuillez vous reconnecter.')
+        err.toastAffiche = true
       }
     } else if (status === 403) {
       toast.erreur('Accès refusé', message)
+      err.toastAffiche = true
     } else if (status === 422) {
       // Géré localement
     } else if (status >= 500) {
       toast.erreur('Erreur serveur', 'Veuillez réessayer plus tard.')
+      err.toastAffiche = true
+    } else if (!err.response) {
+      if (err.code !== 'ERR_CANCELED') {
+        toast.erreur('Connexion impossible', 'Vérifiez votre connexion internet.')
+        err.toastAffiche = true
+      }
     }
 
     return Promise.reject(err)

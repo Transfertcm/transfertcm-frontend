@@ -119,7 +119,7 @@
   <button
     onclick={() => afficherFormAppel = true}
     class="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-all"
-    style="background:linear-gradient(135deg,#f97316,#fbbf24)"
+    style="background:linear-gradient(135deg, #007A5E 0%, #00A878 100%)"
   >
     <span class="material-symbols-outlined icon-filled" style="font-size:16px">add_call</span>
     Enregistrer un appel
@@ -298,7 +298,7 @@
             <div class="flex items-center justify-between py-2.5 border-b border-slate-50 last:border-0">
               <div class="flex items-center gap-3">
                 <div class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold"
-                  style="background:linear-gradient(135deg,#f97316,#fbbf24)">
+                  style="background:linear-gradient(135deg, #007A5E 0%, #00A878 100%)">
                   {(agent.caller_email ?? '?')[0].toUpperCase()}
                 </div>
                 <p class="text-sm font-semibold text-slate-800">{agent.caller_email}</p>
@@ -366,7 +366,7 @@
           </button>
           <button type="submit" disabled={envoiAppel || !formAppel.phoneNumber}
             class="flex-1 px-4 py-2.5 rounded-xl text-white text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
-            style="background:linear-gradient(135deg,#f97316,#fbbf24)">
+            style="background:linear-gradient(135deg, #007A5E 0%, #00A878 100%)">
             {#if envoiAppel}
               <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
             {:else}

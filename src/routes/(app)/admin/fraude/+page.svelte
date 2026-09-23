@@ -127,7 +127,7 @@
 
 <!-- Stats -->
 {#if stats}
-  <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+  <div class="grid grid-cols-2 lg:grid-cols-4 stagger gap-3 mb-5">
     <StatCard titre={$t('admin.fraud.stat.blocked')} valeur={stats.totalBlacklisted ?? 0} icone="block" couleur="rouge" />
     <StatCard titre={$t('admin.fraud.stat.attempts')} valeur={stats.blockedAttempts ?? 0} icone="security" couleur="orange" />
     <StatCard titre={$t('admin.fraud.stat.receipts')} valeur={stats.receiptsVerified ?? 0} icone="receipt_long" couleur="bleu" />
@@ -211,7 +211,7 @@
 
 {:else}
   <!-- Vérification -->
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+  <div class="grid grid-cols-1 lg:grid-cols-2 stagger gap-5">
     <!-- Vérifier un téléphone -->
     <div class="bg-white rounded-2xl border border-slate-100 card-shadow overflow-hidden">
       <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-2">

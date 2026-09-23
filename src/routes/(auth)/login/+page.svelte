@@ -135,12 +135,12 @@
 </svelte:head>
 
 <!-- Titre -->
-<h2 class="font-black text-slate-900 mb-1" style="font-size:2rem; letter-spacing:-0.03em">
+<h2 class="font-black text-slate-900 mb-1 animate-fade-in-up" style="font-size:2rem; letter-spacing:-0.03em">
   Se connecter
 </h2>
-<p class="text-slate-400 text-sm mb-8">{$t('auth.login.description')}</p>
+<p class="text-slate-400 text-sm mb-8 animate-fade-in-up" style="animation-delay:.08s">{$t('auth.login.description')}</p>
 
-<form onsubmit={seConnecter} class="space-y-5">
+<form onsubmit={seConnecter} class="space-y-5 stagger">
 
   <!-- Email -->
   <div>
@@ -202,14 +202,14 @@
   <button
     type="submit"
     disabled={chargement || !email || !motDePasse}
-    class="w-full py-3.5 rounded-xl text-white font-bold text-sm flex items-center justify-center gap-2 mt-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+    class="w-full py-3.5 rounded-xl text-white font-bold text-sm flex items-center justify-center gap-2 mt-2 transition-all press-scale disabled:opacity-50 disabled:cursor-not-allowed"
     style="background: {!chargement && email && motDePasse
       ? (onglet === 'admin'
-          ? 'linear-gradient(135deg, #f97316 0%, #fbbf24 100%)'
+          ? 'linear-gradient(135deg, #007A5E 0%, #00A878 100%)'
           : 'linear-gradient(135deg, #1e293b 0%, #334155 100%)')
       : '#e2e8f0'}; color: {!chargement && email && motDePasse ? 'white' : '#94a3b8'};
       box-shadow: {!chargement && email && motDePasse
-        ? (onglet === 'admin' ? '0 4px 14px rgba(249,115,22,0.3)' : '0 4px 14px rgba(15,23,42,0.25)')
+        ? (onglet === 'admin' ? '0 4px 14px rgba(0,122,94,0.3)' : '0 4px 14px rgba(15,23,42,0.25)')
         : 'none'}"
   >
     {#if chargement}

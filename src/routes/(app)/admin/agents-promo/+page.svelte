@@ -142,7 +142,7 @@
         class="bg-white rounded-2xl border border-slate-100 card-shadow p-5 text-left hover:border-orange-200 transition-all group">
         <div class="flex items-start gap-3 mb-4">
           <div class="w-11 h-11 rounded-xl flex items-center justify-center text-white font-bold text-sm shrink-0"
-            style="background:linear-gradient(135deg,#f97316,#fbbf24)">
+            style="background:linear-gradient(135deg, #007A5E 0%, #00A878 100%)">
             {(agent.first_name ?? '?')[0]}{(agent.last_name ?? '?')[0]}
           </div>
           <div class="flex-1 min-w-0">
@@ -194,7 +194,7 @@
       <div class="px-6 py-5 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white z-10">
         <div class="flex items-center gap-3">
           <div class="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold shrink-0"
-            style="background:linear-gradient(135deg,#f97316,#fbbf24)">
+            style="background:linear-gradient(135deg, #007A5E 0%, #00A878 100%)">
             {(agentSelectionne.first_name ?? '?')[0]}{(agentSelectionne.last_name ?? '?')[0]}
           </div>
           <div>

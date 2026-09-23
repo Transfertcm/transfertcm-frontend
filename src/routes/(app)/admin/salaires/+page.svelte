@@ -221,7 +221,7 @@
   <div class="flex items-center justify-between flex-wrap gap-4">
     <div class="flex items-center gap-4">
       <div class="w-12 h-12 rounded-xl flex items-center justify-center shrink-0"
-        style="background:linear-gradient(135deg,#f97316,#fbbf24)">
+        style="background:linear-gradient(135deg, #007A5E 0%, #00A878 100%)">
         <span class="material-symbols-outlined text-white icon-filled" style="font-size:22px">timer</span>
       </div>
       <div>

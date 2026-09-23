@@ -30,7 +30,7 @@
   )
 </script>
 
-<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border {cfg.classe}">
+<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border badge-enter {cfg.classe}">
   <span class="material-symbols-outlined icon-filled" style="font-size: 12px;">{cfg.icone}</span>
   {$t(cfg.label)}
 </span>

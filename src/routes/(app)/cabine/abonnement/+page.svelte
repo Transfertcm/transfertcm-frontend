@@ -115,7 +115,7 @@
 
   <!-- Statut principal -->
   <div class="bg-white rounded-2xl border border-slate-100 card-shadow p-5 mb-5">
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div class="grid grid-cols-2 md:grid-cols-4 stagger gap-4">
       <div class="text-center p-4 rounded-xl bg-slate-50">
         <p class="text-xs text-slate-500 mb-2">Plan actuel</p>
         <span class="text-xs font-bold px-3 py-1 rounded-full capitalize

@@ -528,7 +528,7 @@
     <a href="/admin/profil" class="flex items-center gap-2 px-2.5 py-1.5 rounded-xl hover:bg-slate-100 transition-all ml-1">
       <div
         class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
-        style="background: linear-gradient(135deg, #f97316 0%, #fbbf24 100%)"
+        style="background: linear-gradient(135deg, #007A5E 0%, #00A878 100%)"
       >
         {initiales(auth.user?.fullName ?? null)}
       </div>

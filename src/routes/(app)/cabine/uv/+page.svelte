@@ -189,7 +189,7 @@
     </div>
   {/if}
 
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+  <div class="grid grid-cols-1 lg:grid-cols-2 stagger gap-5">
 
     <!-- Demandes -->
     <div class="bg-white rounded-2xl border border-slate-100 card-shadow overflow-hidden">

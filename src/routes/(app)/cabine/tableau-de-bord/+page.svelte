@@ -4,6 +4,7 @@
   import { cabinAuth } from '$lib/stores/cabin-auth.svelte'
   import { toast } from '$lib/stores/toast.svelte'
   import { t, translate } from '$lib/stores/locale'
+  import { formatOrderCode } from '$lib/reference'
 
   let dashboard    = $state<any>(null)
   let chargement   = $state(true)
@@ -231,7 +232,7 @@
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2">
                 <p class="text-xs font-mono font-bold text-orange-600">
-                  #{(cmd.order_code ?? cmd.orderCode ?? cmd.id ?? '').slice(-8)}
+                  {formatOrderCode(cmd.order_code, cmd.orderCode, cmd.id)}
                 </p>
               </div>
               <p class="text-sm font-semibold text-slate-800 truncate">

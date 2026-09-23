@@ -175,7 +175,7 @@
   </div>
   <button onclick={ouvrirCreation}
     class="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white transition-all"
-    style="background:linear-gradient(135deg,#f97316,#fbbf24)">
+    style="background:linear-gradient(135deg, #007A5E 0%, #00A878 100%)">
     <span class="material-symbols-outlined icon-filled" style="font-size:16px">add</span>
     Nouvelle tâche
   </button>
@@ -389,7 +389,7 @@
           </button>
           <button type="submit" disabled={envoi || !form.title || (isSuperAdmin && !form.assignedTo)}
             class="flex-1 px-4 py-2.5 rounded-xl text-white text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
-            style="background:linear-gradient(135deg,#f97316,#fbbf24)">
+            style="background:linear-gradient(135deg, #007A5E 0%, #00A878 100%)">
             {#if envoi}
               <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
             {:else}

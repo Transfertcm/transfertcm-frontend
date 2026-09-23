@@ -119,7 +119,7 @@
   </div>
 
   <!-- Statistiques globales -->
-  <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+  <div class="grid grid-cols-2 md:grid-cols-4 stagger gap-4 mb-5">
     {#each [
       { label: 'Total commandes', val: data.scores?.totalOrders ?? data.scores?.total_orders ?? 0, icon: 'receipt_long', color: 'slate' },
       { label: 'Complétées',      val: data.scores?.completedOrders ?? data.scores?.completed_orders ?? 0, icon: 'check_circle', color: 'emerald' },

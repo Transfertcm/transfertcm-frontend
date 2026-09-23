@@ -178,7 +178,7 @@
           <!-- Client -->
           <div class="lg:col-span-3 flex items-center gap-2 min-w-0">
             <div class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
-              style="background:linear-gradient(135deg,#f97316,#fbbf24)">
+              style="background:linear-gradient(135deg, #007A5E 0%, #00A878 100%)">
               {String(rec.customerPhone ?? rec.customer_phone ?? '?').slice(-2)}
             </div>
             <div class="min-w-0">

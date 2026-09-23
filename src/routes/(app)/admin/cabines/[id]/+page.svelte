@@ -253,17 +253,17 @@
 </div>
 
 {#if chargement}
-  <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+  <div class="grid grid-cols-2 lg:grid-cols-4 stagger gap-3 mb-5">
     {#each Array(4) as _}<div class="skeleton h-24 rounded-xl"></div>{/each}
   </div>
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+  <div class="grid grid-cols-1 lg:grid-cols-3 stagger gap-5">
     <div class="lg:col-span-2 skeleton h-64 rounded-2xl"></div>
     <div class="skeleton h-64 rounded-2xl"></div>
   </div>
 {:else if cabine}
 
   <!-- Stats rapides -->
-  <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+  <div class="grid grid-cols-2 lg:grid-cols-4 stagger gap-3 mb-5">
     <StatCard titre="Commandes aujourd'hui" valeur={cabine.dailyOrdersCount ?? cabine.daily_orders_count ?? 0} icone="receipt_long" couleur="orange"
       sousTitre="Max : {cabine.maxDailyOrders ?? cabine.max_daily_orders ?? '∞'}" />
     <StatCard titre="Solde UV" valeur={cabine.uvBalance ?? cabine.uv_balance ?? 0} icone="bolt" couleur="jaune" />
@@ -271,7 +271,7 @@
     <StatCard titre="Chiffre d'affaires" valeur={stats?.totals?.total_amount ? (Number(stats.totals.total_amount) / 1000).toFixed(0) + ' K XAF' : '—'} icone="payments" couleur="vert" />
   </div>
 
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+  <div class="grid grid-cols-1 lg:grid-cols-3 stagger gap-5">
 
     <!-- Colonne principale -->
     <div class="lg:col-span-2 space-y-5">
@@ -384,7 +384,7 @@
               <span class="font-semibold">{count} / {max} ({pct}%)</span>
             </div>
             <div class="h-2 bg-slate-100 rounded-full overflow-hidden">
-              <div class="h-full rounded-full transition-all" style="width:{pct}%; background:linear-gradient(90deg,#f97316,#fbbf24)"></div>
+              <div class="h-full rounded-full transition-all" style="width:{pct}%; background:linear-gradient(90deg, #007A5E 0%, #00A878 100%)"></div>
             </div>
           </div>
         {/if}

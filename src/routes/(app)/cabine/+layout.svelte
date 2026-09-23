@@ -47,8 +47,10 @@
   async function seDeconnecter() {
     try { await apiCabin.post('/cabin/auth/logout') } catch {}
     cabinAuth.logout()
+    // Le message est affiché une fois la navigation faite : émis avant,
+    // il se monte pendant le changement de page et s'affiche à moitié.
+    await goto('/login')
     toast.info(translate('cabin.logout.title'), translate('toast.goodbye'))
-    goto('/login')
   }
 
   function titrePage() {
@@ -104,7 +106,7 @@
         <div class="flex items-center gap-2.5 w-full">
           <div
             class="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-            style="background: linear-gradient(135deg, #f97316 0%, #fbbf24 100%)"
+            style="background: linear-gradient(135deg, #007A5E 0%, #00A878 100%)"
           >
             <span class="material-symbols-outlined icon-filled text-white" style="font-size: 18px;">store</span>
           </div>
@@ -126,7 +128,7 @@
       {:else}
         <div
           class="w-9 h-9 rounded-xl flex items-center justify-center"
-          style="background: linear-gradient(135deg, #f97316 0%, #fbbf24 100%)"
+          style="background: linear-gradient(135deg, #007A5E 0%, #00A878 100%)"
         >
           <span class="material-symbols-outlined icon-filled text-white" style="font-size: 18px;">store</span>
         </div>
@@ -159,7 +161,7 @@
       >
         <div
           class="w-8 h-8 rounded-full shrink-0 flex items-center justify-center text-white text-xs font-bold"
-          style="background: linear-gradient(135deg, #f97316 0%, #fbbf24 100%)"
+          style="background: linear-gradient(135deg, #007A5E 0%, #00A878 100%)"
         >
           {initiale()}
         </div>
@@ -243,7 +245,7 @@
         >
           <div
             class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
-            style="background: linear-gradient(135deg, #f97316 0%, #fbbf24 100%)"
+            style="background: linear-gradient(135deg, #007A5E 0%, #00A878 100%)"
           >
             {initiale()}
           </div>

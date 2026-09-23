@@ -221,7 +221,7 @@
 </div>
 
 {#if chargement}
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+  <div class="grid grid-cols-1 lg:grid-cols-3 stagger gap-5">
     <div class="lg:col-span-2 space-y-5">
       <div class="skeleton h-48 rounded-2xl"></div>
       <div class="skeleton h-40 rounded-2xl"></div>
@@ -232,7 +232,7 @@
     </div>
   </div>
 {:else if commande}
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+  <div class="grid grid-cols-1 lg:grid-cols-3 stagger gap-5">
 
     <!-- Colonne principale -->
     <div class="lg:col-span-2 space-y-5">
@@ -288,7 +288,7 @@
         </div>
         <div class="p-5 grid grid-cols-1 sm:grid-cols-2 gap-5">
           <div class="flex items-center gap-3 p-3 rounded-xl bg-slate-50">
-            <div class="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0" style="background:linear-gradient(135deg,#f97316,#fbbf24)">
+            <div class="w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0" style="background:linear-gradient(135deg, #007A5E 0%, #00A878 100%)">
               {(commande.customerPhone ?? '?').slice(-2)}
             </div>
             <div>

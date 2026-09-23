@@ -38,7 +38,7 @@
     aria-label={titre}
   >
     <div
-      class="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full {largeurs[largeur]} pointer-events-auto animate-fade-in-up max-h-[90vh] flex flex-col"
+      class="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full {largeurs[largeur]} pointer-events-auto animate-scale-in max-h-[90vh] flex flex-col"
       style="box-shadow: 0 25px 60px rgba(0,0,0,0.18), 0 8px 24px rgba(0,0,0,0.10);"
     >
       {#if titre}

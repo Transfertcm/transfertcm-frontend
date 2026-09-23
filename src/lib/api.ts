@@ -3,7 +3,7 @@ import { auth } from '$lib/stores/auth.svelte'
 import { toast } from '$lib/stores/toast.svelte'
 import { goto } from '$app/navigation'
 
-export const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3334/api/v1'
+export const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3333/api/v1'
 
 const api = axios.create({
   baseURL: BASE_URL,
@@ -36,15 +36,25 @@ api.interceptors.response.use(
         auth.logout()
         sessionStorage.setItem('tcm_auth_error', 'Session expirée — veuillez vous reconnecter.')
         goto('/login')
+        err.toastAffiche = true
       }
     } else if (status === 403) {
       if (!url.includes('notifications')) {
         toast.error('Accès refusé', message)
+        err.toastAffiche = true
       }
     } else if (status === 422) {
       // Géré localement dans chaque page
     } else if (status >= 500) {
       toast.error('Erreur serveur', 'Veuillez réessayer plus tard.')
+      err.toastAffiche = true
+    } else if (!err.response) {
+      // Serveur injoignable ou requête annulée : sans réponse, `status` est
+      // indéfini et aucune branche ci-dessus ne se déclenchait.
+      if (err.code !== 'ERR_CANCELED') {
+        toast.error('Connexion impossible', 'Vérifiez votre connexion internet.')
+        err.toastAffiche = true
+      }
     }
 
     return Promise.reject(err)

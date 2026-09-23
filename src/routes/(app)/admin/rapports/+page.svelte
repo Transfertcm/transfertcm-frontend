@@ -242,15 +242,15 @@
   </div>
 
   {#if chargementFinances}
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+    <div class="grid grid-cols-2 md:grid-cols-4 stagger gap-4 mb-5">
       {#each Array(4) as _}<div class="skeleton h-24 rounded-2xl"></div>{/each}
     </div>
   {:else if finances}
     <!-- KPIs -->
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+    <div class="grid grid-cols-2 md:grid-cols-4 stagger gap-4 mb-5">
       {#each [
         { label: 'Revenu total', val: formaterMontant(finances.totals?.total_revenue), icone: 'payments', couleur: '#10b981' },
-        { label: 'Montant transféré', val: formaterMontant(finances.totals?.total_amount), icone: 'swap_horiz', couleur: '#f97316' },
+        { label: 'Montant transféré', val: formaterMontant(finances.totals?.total_amount), icone: 'swap_horiz', couleur: '#007A5E' },
         { label: 'Commandes complétées', val: finances.totals?.total_orders ?? 0, icone: 'check_circle', couleur: '#3b82f6' },
         { label: 'Cabines actives', val: (finances.topCabins ?? []).length, icone: 'store', couleur: '#8b5cf6' },
       ] as kpi}
@@ -264,7 +264,7 @@
       {/each}
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+    <div class="grid grid-cols-1 lg:grid-cols-2 stagger gap-5 mb-5">
       <!-- Par réseau -->
       <div class="bg-white rounded-2xl border border-slate-100 card-shadow p-5">
         <h3 class="font-bold text-slate-900 mb-4 flex items-center gap-2">

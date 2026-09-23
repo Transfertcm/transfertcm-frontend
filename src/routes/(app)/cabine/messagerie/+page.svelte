@@ -106,7 +106,7 @@
   <!-- En-tête -->
   <div class="px-5 py-3.5 border-b border-slate-100 flex items-center gap-3 bg-white shrink-0">
     <div class="w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-sm shrink-0"
-      style="background: linear-gradient(135deg, #f97316, #fbbf24)">A</div>
+      style="background: linear-gradient(135deg, #007A5E 0%, #00A878 100%)">A</div>
     <div>
       <p class="font-semibold text-slate-900 text-sm">Administration TransfertCM</p>
       <div class="flex items-center gap-1.5 mt-0.5">
@@ -146,7 +146,7 @@
             {msg.sender_type === 'cabin'
               ? 'text-white rounded-br-sm' + (msg._pending ? ' opacity-70' : '')
               : 'bg-slate-100 text-slate-800 rounded-bl-sm'}"
-            style={msg.sender_type === 'cabin' ? 'background: linear-gradient(135deg, #f97316, #fbbf24)' : ''}>
+            style={msg.sender_type === 'cabin' ? 'background: linear-gradient(135deg, #007A5E 0%, #00A878 100%)' : ''}>
             <p class="leading-relaxed break-words">{msg.content}</p>
             <div class="flex items-center justify-end gap-1 mt-1">
               <p class="text-xs {msg.sender_type === 'cabin' ? 'text-white/70' : 'text-slate-400'}">
@@ -178,7 +178,7 @@
         type="submit"
         disabled={!nouveauMessage.trim() || envoi}
         class="w-10 h-10 rounded-xl flex items-center justify-center text-white transition-all disabled:opacity-40"
-        style="background: linear-gradient(135deg, #f97316, #fbbf24)"
+        style="background: linear-gradient(135deg, #007A5E 0%, #00A878 100%)"
       >
         {#if envoi}
           <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>

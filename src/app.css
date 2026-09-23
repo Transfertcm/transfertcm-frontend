@@ -1,45 +1,78 @@
 @import "tailwindcss";
 
 /* ==========================================================
-   Inter — police principale
+   Design system — aligné sur l'app mobile Flutter
+   Source : lib/core/theme/{app_theme,app_typography,app_spacing}.dart
    ========================================================== */
 @theme {
-  --font-sans: 'Inter', sans-serif;
-  --font-display: 'Inter', sans-serif;
+  --font-sans: 'Plus Jakarta Sans', sans-serif;
+  --font-display: 'Plus Jakarta Sans', sans-serif;
 
-  /* ── Couleurs TransfertCM ─────────────────────────────── */
+  /* ── Vert TransfertCM — AppColors.primary / primaryEnd ─── */
+  --color-brand-50:  #e6f4f0;
+  --color-brand-100: #c2e4da;
+  --color-brand-200: #9bd3c3;
+  --color-brand-300: #6fc0a8;
+  --color-brand-400: #33ab8c;
+  --color-brand-500: #00a878;
+  --color-brand-600: #007a5e;
+  --color-brand-700: #00664e;
+  --color-brand-800: #00513e;
+  --color-brand-900: #003b2d;
 
-  /* Orange — couleur primaire signature */
-  --color-brand-50:  #fff7ed;
-  --color-brand-100: #ffedd5;
-  --color-brand-200: #fed7aa;
-  --color-brand-300: #fdba74;
-  --color-brand-400: #fb923c;
-  --color-brand-500: #f97316;   /* orange principal */
-  --color-brand-600: #ea6c0a;
-  --color-brand-700: #c2570a;
-  --color-brand-800: #9a3f0b;
-  --color-brand-900: #7c3009;
+  /* Echelles orange/amber redefinies sur le vert de marque : les pages les
+     utilisent en dur, la teinte suit sans reecrire les gabarits. Les couleurs
+     operateur (MTN, Orange) sont en hexadecimal dans les pages, non touchees. */
+  --color-orange-50:  #e6f4f0;
+  --color-orange-100: #c2e4da;
+  --color-orange-200: #9bd3c3;
+  --color-orange-300: #6fc0a8;
+  --color-orange-400: #33ab8c;
+  --color-orange-500: #00a878;
+  --color-orange-600: #007a5e;
+  --color-orange-700: #00664e;
+  --color-orange-800: #00513e;
+  --color-orange-900: #003b2d;
 
-  /* Jaune — accent secondaire */
-  --color-accent-50:  #fffbeb;
-  --color-accent-100: #fef3c7;
-  --color-accent-200: #fde68a;
-  --color-accent-300: #fcd34d;
-  --color-accent-400: #fbbf24;   /* jaune principal */
-  --color-accent-500: #f59e0b;
-  --color-accent-600: #d97706;
-  --color-accent-700: #b45309;
+  --color-amber-50:  #e6f4f0;
+  --color-amber-100: #c2e4da;
+  --color-amber-200: #9bd3c3;
+  --color-amber-300: #6fc0a8;
+  --color-amber-400: #33ab8c;
+  --color-amber-500: #00a878;
+  --color-amber-600: #007a5e;
+  --color-amber-700: #00664e;
+  --color-amber-800: #00513e;
+  --color-amber-900: #003b2d;
 
-  /* Succès */
+  --color-accent-50:  #e6f4f0;
+  --color-accent-100: #c2e4da;
+  --color-accent-200: #9bd3c3;
+  --color-accent-300: #6fc0a8;
+  --color-accent-400: #00a878;
+  --color-accent-500: #00a878;
+  --color-accent-600: #007a5e;
+  --color-accent-700: #00664e;
+
+  /* ── Sémantique — AppColors ───────────────────────────── */
   --color-success-500: #10b981;
   --color-success-600: #059669;
+  --color-danger-500:  #ef4444;
+  --color-danger-600:  #dc2626;
+  --color-warning-500: #f59e0b;
+  --color-info-500:    #3b82f6;
 
-  /* Danger */
-  --color-danger-500: #ef4444;
-  --color-danger-600: #dc2626;
+  /* ── Couleurs de marque opérateur (hors identité app) ─── */
+  --color-operator-mtn:    #f59e0b;
+  --color-operator-orange: #f97316;
 
-  /* Neutres */
+  /* ── Fond sombre des en-têtes — AppColors.ink ─────────── */
+  --color-ink:          #0b1220;
+  --color-ink-soft:     #162032;
+  --color-on-ink:       #f8fafc;
+  --color-on-ink-muted: #94a3b8;
+
+  /* ── Neutres — AppColors.text* / border / background ──── */
   --color-slate-50:  #f8fafc;
   --color-slate-100: #f1f5f9;
   --color-slate-200: #e2e8f0;
@@ -50,17 +83,88 @@
   --color-slate-700: #334155;
   --color-slate-800: #1e293b;
   --color-slate-900: #0f172a;
+
+  /* ── Espacement — AppSpacing ──────────────────────────────
+     Préfixe `app-` volontaire : dans Tailwind v4, `--spacing-*` est
+     l'espace de noms qui alimente max-w-*, w-*, p-*… Le redéfinir ici
+     écrasait l'échelle de Tailwind (max-w-sm devenait 8px). */
+  --app-space-xs:  4px;
+  --app-space-sm:  8px;
+  --app-space-md:  12px;
+  --app-space-lg:  16px;
+  --app-space-xl:  24px;
+  --app-space-xxl: 32px;
+  --app-space-gutter: 20px;
+
+  /* ── Rayons — AppRadius ───────────────────────────────────
+     Préfixe `app-` pour la même raison que l'espacement : `--radius-*`
+     alimente rounded-* dans Tailwind v4. */
+  --app-radius-sm:   10px;
+  --app-radius-md:   14px;
+  --app-radius-lg:   18px;
+  --app-radius-xl:   24px;
+  --app-radius-pill: 999px;
 }
 
+/* ==========================================================
+   Base
+   ========================================================== */
 * { box-sizing: border-box; }
 
 body {
-  font-family: 'Inter', sans-serif;
+  font-family: 'Plus Jakarta Sans', sans-serif;
   background-color: #f8fafc;
-  color: #1e293b;
+  color: #0f172a;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* ── Échelle typographique — AppText ──────────────────────── */
+.text-title {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  line-height: 1.2;
+  color: #0f172a;
+}
+.text-heading {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  line-height: 1.3;
+  color: #0f172a;
+}
+.text-body {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.45;
+  color: #0f172a;
+}
+.text-body-strong { font-size: 14px; font-weight: 600; line-height: 1.45; color: #0f172a; }
+.text-caption {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+  color: #64748b;
+}
+.text-overline {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  color: #94a3b8;
+  text-transform: uppercase;
+}
+/* Montants : chiffres tabulaires pour aligner les colonnes — AppText.amount */
+.text-amount {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.8px;
+  line-height: 1.1;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+.tabular-figures { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1; }
 
 /* ── Material Symbols ─────────────────────────────────────── */
 .material-symbols-outlined {
@@ -78,7 +182,9 @@ body {
 ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
-/* ── Animations ───────────────────────────────────────────── */
+/* ==========================================================
+   Animations
+   ========================================================== */
 @keyframes fadeInUp {
   from { opacity: 0; transform: translateY(12px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -100,9 +206,9 @@ body {
   100% { background-position: 200% 0; }
 }
 
-.animate-fade-in-up    { animation: fadeInUp 0.3s ease both; }
-.animate-fade-in-down  { animation: fadeInDown 0.3s ease both; }
-.animate-slide-in-right { animation: slideInRight 0.35s cubic-bezier(.16,1,.3,1) both; }
+.animate-fade-in-up      { animation: fadeInUp 0.3s ease both; }
+.animate-fade-in-down    { animation: fadeInDown 0.3s ease both; }
+.animate-slide-in-right  { animation: slideInRight 0.35s cubic-bezier(.16,1,.3,1) both; }
 .animate-slide-out-right { animation: slideOutRight 0.3s ease both; }
 
 /* ── Skeleton loader ──────────────────────────────────────── */
@@ -113,80 +219,122 @@ body {
   border-radius: 8px;
 }
 
-/* ── Card shadows ─────────────────────────────────────────── */
+/* ==========================================================
+   Surfaces — AppElevation
+   ========================================================== */
 .card-shadow {
-  box-shadow: 0 1px 8px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(0,0,0,0.04);
+  box-shadow: 0 2px 16px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06);
 }
-.card-shadow-hover {
-  transition: all 0.2s ease;
-}
+.card-shadow-hover { transition: all 0.2s ease; }
 .card-shadow-hover:hover {
-  box-shadow: 0 6px 24px rgba(249, 115, 22, 0.12), 0 2px 8px rgba(0,0,0,0.05);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
   transform: translateY(-1px);
 }
+.shadow-raised {
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
 
-/* ── Bouton primaire orange ───────────────────────────────── */
+/* Carte — CardTheme mobile : surface, rayon 16, bordure, sans élévation */
+.card {
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+}
+
+/* ==========================================================
+   Boutons — ElevatedButtonTheme
+   ========================================================== */
 .btn-primary {
-  background-color: #f97316;
+  background-color: #007a5e;
   color: #ffffff;
-  box-shadow: 0 4px 14px rgba(249, 115, 22, 0.35);
-  border-radius: 0.75rem;
-  padding: 0.625rem 1.25rem;
-  font-weight: 600;
-  font-size: 0.875rem;
+  border-radius: 14px;
+  padding: 0.75rem 1.25rem;
+  font-weight: 700;
+  font-size: 15px;
   transition: all 0.2s ease;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.5rem;
 }
 .btn-primary:hover {
-  background-color: #ea6c0a;
-  box-shadow: 0 6px 20px rgba(249, 115, 22, 0.45);
-  transform: scale(1.01);
+  background-color: #00664e;
+  box-shadow: 0 6px 20px rgba(0, 122, 94, 0.25);
 }
 .btn-primary:active { transform: scale(0.99); }
 .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; box-shadow: none; transform: none; }
 
-/* ── Bouton secondaire ────────────────────────────────────── */
 .btn-secondary {
-  background-color: #fff7ed;
-  color: #f97316;
-  border: 1px solid #fed7aa;
-  border-radius: 0.75rem;
-  padding: 0.625rem 1.25rem;
-  font-weight: 600;
-  font-size: 0.875rem;
+  background-color: #e6f4f0;
+  color: #007a5e;
+  border: 1px solid #9bd3c3;
+  border-radius: 14px;
+  padding: 0.75rem 1.25rem;
+  font-weight: 700;
+  font-size: 15px;
   transition: all 0.2s ease;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.5rem;
 }
 .btn-secondary:hover {
-  background-color: #ffedd5;
-  border-color: #fdba74;
-  transform: scale(1.01);
+  background-color: #c2e4da;
+  border-color: #6fc0a8;
 }
 
-/* ── Input focus ──────────────────────────────────────────── */
+/* ==========================================================
+   Champs de saisie — InputDecorationTheme
+   ========================================================== */
+input, select, textarea {
+  background-color: #ffffff;
+}
 input:focus, select:focus, textarea:focus {
   outline: none;
-  box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.2);
-  border-color: #f97316;
+  border-color: #007a5e;
+  box-shadow: 0 0 0 1.5px rgba(0, 122, 94, 0.35);
 }
-input, select, textarea {
-  background-color: #fafafa;
+
+.field {
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 14px 16px;
+  font-size: 14px;
+  color: #0f172a;
 }
+.field::placeholder { color: #94a3b8; }
+.field:focus {
+  border-color: #007a5e;
+  box-shadow: 0 0 0 1.5px rgba(0, 122, 94, 0.35);
+  outline: none;
+}
+.field-error { border-color: #ef4444; }
 
 /* ── Transitions globales ─────────────────────────────────── */
 a, button { transition: all 0.2s ease; }
 
-/* ── Gradient orange signature ────────────────────────────── */
+/* ==========================================================
+   Dégradés — AppColors.primaryGradient
+   ========================================================== */
 .gradient-brand {
-  background: linear-gradient(135deg, #f97316 0%, #fbbf24 100%);
+  background: linear-gradient(135deg, #007a5e 0%, #00a878 100%);
 }
 .gradient-brand-soft {
-  background: linear-gradient(135deg, #fff7ed 0%, #fffbeb 100%);
+  background: linear-gradient(135deg, #e6f4f0 0%, #f8fafc 100%);
 }
+/* En-tête sombre d'accueil et de tableau de bord — AppInkHeader.
+   Un aplat, pas un dégradé : hauteur 210px, coins bas arrondis à 24px. */
+.ink-header {
+  background-color: #0b1220;
+  min-height: 210px;
+  border-radius: 0 0 24px 24px;
+  padding: 16px 20px 0;
+}
+.bg-ink      { background-color: #0b1220; }
+.bg-ink-soft { background-color: #162032; }
+.text-on-ink       { color: #f8fafc; }
+.text-on-ink-muted { color: #94a3b8; }
 
 /* ── Glass effect ─────────────────────────────────────────── */
 .glass {
@@ -201,65 +349,266 @@ a, button { transition: all 0.2s ease; }
   color: #64748b;
   font-size: 0.875rem;
   font-weight: 500;
+  transition: background-color .2s ease, color .2s ease, transform .2s cubic-bezier(.16,1,.3,1);
 }
 .sidebar-link:hover {
-  background-color: #fff7ed;
-  color: #f97316;
+  background-color: #e6f4f0;
+  color: #007a5e;
+  transform: translateX(3px);
 }
+.sidebar-link .material-symbols-outlined {
+  transition: transform .28s cubic-bezier(.34,1.56,.64,1);
+}
+.sidebar-link:hover .material-symbols-outlined { transform: scale(1.12); }
+/* L'onglet courant porte un repère qui se déploie verticalement. */
+.sidebar-link.is-active::before{
+  content:""; position:absolute; left:0; top:50%; transform:translateY(-50%);
+  width:3px; height:0; border-radius:0 3px 3px 0; background:#fff;
+  animation: markerGrow .3s cubic-bezier(.16,1,.3,1) .05s forwards;
+}
+@keyframes markerGrow { to { height:56%; } }
 .sidebar-link.is-active {
-  background-color: #f97316;
+  background-color: #007a5e;
   color: #ffffff;
-  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.3);
+  box-shadow: 0 4px 12px rgba(0, 122, 94, 0.25);
 }
 .sidebar-link.is-active:hover {
-  background-color: #ea6c0a;
+  background-color: #00664e;
   color: #ffffff;
 }
 
-/* ── Dark mode ────────────────────────────────────────────── */
+/* ==========================================================
+   Dark mode
+   ========================================================== */
 :root.dark {
   color-scheme: dark;
 }
 :root.dark body {
-  background-color: #1a1d23;
+  background-color: #0b1220;
   color: #e2e8f0;
 }
 @layer utilities {
-  :root.dark .bg-white { background-color: #242830; }
-  :root.dark .bg-slate-50 { background-color: #1e2128; }
-  :root.dark .bg-slate-100 { background-color: #2a2f3a; }
-  :root.dark .border-slate-100 { border-color: #2e3340; }
-  :root.dark .border-slate-200 { border-color: #363c4a; }
+  :root.dark .bg-white { background-color: #162032; }
+  :root.dark .bg-slate-50 { background-color: #111a2b; }
+  :root.dark .bg-slate-100 { background-color: #1d2942; }
+  :root.dark .border-slate-100 { border-color: #1d2942; }
+  :root.dark .border-slate-200 { border-color: #24314d; }
   :root.dark .text-slate-900 { color: #f1f5f9; }
   :root.dark .text-slate-800 { color: #e2e8f0; }
   :root.dark .text-slate-700 { color: #cbd5e1; }
   :root.dark .text-slate-600 { color: #94a3b8; }
   :root.dark .text-slate-500 { color: #64748b; }
-  :root.dark .hover\:bg-slate-50:hover { background-color: #2a2f3a; }
-  :root.dark .hover\:bg-slate-100:hover { background-color: #2e3340; }
+  :root.dark .hover\:bg-slate-50:hover { background-color: #1d2942; }
+  :root.dark .hover\:bg-slate-100:hover { background-color: #24314d; }
 }
 :root.dark header,
 :root.dark aside,
 :root.dark footer {
-  background-color: #1e2128;
-  border-color: #2e3340;
+  background-color: #111a2b;
+  border-color: #24314d;
+}
+:root.dark .card {
+  background-color: #162032;
+  border-color: #24314d;
 }
 :root.dark input,
 :root.dark select,
-:root.dark textarea {
-  background-color: #2a2f3a;
-  border-color: #363c4a;
+:root.dark textarea,
+:root.dark .field {
+  background-color: #1d2942;
+  border-color: #24314d;
   color: #e2e8f0;
 }
 :root.dark .skeleton {
-  background: linear-gradient(90deg, #2a2f3a 25%, #363c4a 50%, #2a2f3a 75%);
+  background: linear-gradient(90deg, #1d2942 25%, #24314d 50%, #1d2942 75%);
 }
-:root.dark #app-layout { background-color: #1a1d23; }
+:root.dark .text-title,
+:root.dark .text-heading,
+:root.dark .text-body,
+:root.dark .text-body-strong,
+:root.dark .text-amount { color: #f1f5f9; }
+:root.dark .text-caption { color: #94a3b8; }
+:root.dark #app-layout { background-color: #0b1220; }
+
+
+/* ==========================================================
+   Composants — recettes reprises de l'app mobile
+   ========================================================== */
+
+/* Carte interactive — AppCard, pression à 0.98 sur 160ms */
+.card-interactive { transition: transform 160ms cubic-bezier(.33,1,.68,1); cursor: pointer; }
+.card-interactive:active { transform: scale(0.98); }
+
+/* Ligne d'information — AppInfoRow */
+.info-row {
+  display: flex; align-items: baseline; gap: 12px; padding: 8px 0;
+}
+.info-row > .label { flex: 4; font-size: 12px; color: #64748b; }
+.info-row > .value { flex: 5; text-align: right; font-size: 14px; font-weight: 600; color: #0f172a; }
+
+/* Pastille de statut — AppBadge (pilule) */
+.badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 600;
+}
+.badge .dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
+
+/* Pastille de statut en liste — OrderStatusBadge */
+.badge-status {
+  display: inline-flex; align-items: center;
+  padding: 5px 10px; border-radius: 18px;
+  font-size: 10px; font-weight: 700;
+}
+
+/* Teintes de statut — OrderPhase → couleur */
+.status-completed  { color: #10b981; background: rgba(16, 185, 129, 0.08); }
+.status-processing { color: #3b82f6; background: rgba(59, 130, 246, 0.08); }
+.status-pending    { color: #f59e0b; background: rgba(245, 158, 11, 0.08); }
+.status-failed,
+.status-unknown    { color: #94a3b8; background: rgba(148, 163, 184, 0.08); }
+
+/* Bandeau — AppBanner */
+.banner {
+  padding: 16px; border-radius: 14px;
+  display: flex; align-items: flex-start; gap: 12px;
+  font-size: 12.5px; color: #0f172a;
+}
+.banner-success { background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.2); }
+.banner-error   { background: rgba(239, 68, 68, 0.08);  border: 1px solid rgba(239, 68, 68, 0.2); }
+.banner-warning { background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.2); }
+.banner-info    { background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.2); }
+
+/* Chip de filtre — orders_screen */
+.chip {
+  padding: 8px 16px; border-radius: 999px;
+  font-size: 12px; font-weight: 600;
+  background: #ffffff; border: 1px solid #e2e8f0; color: #64748b;
+  transition: all 0.2s ease;
+}
+.chip.is-active { background: #007a5e; border-color: #007a5e; color: #ffffff; }
+
+/* Tuile de statistique — AppStatTile */
+.stat-tile {
+  background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 16px;
+  box-shadow: 0 2px 16px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+.stat-tile .value {
+  font-size: 20px; font-weight: 700; letter-spacing: -0.8px; line-height: 1.1;
+  font-variant-numeric: tabular-nums; color: #0f172a;
+}
+.stat-tile .label { font-size: 11.5px; color: #64748b; margin-top: 2px; }
+
+/* Carte solde posée sur l'en-tête sombre — AppBalanceCard */
+.balance-card {
+  background: linear-gradient(135deg, #007a5e 0%, #00a878 100%);
+  border-radius: 24px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  padding: 24px 24px 16px;
+  color: #ffffff;
+}
+
+/* Séparateur de liste groupée — retrait de 52px pour dégager l'icône */
+.list-divider { height: 1px; background: #e2e8f0; margin-left: 52px; margin-right: 16px; }
+
+/* État vide — EmptyView */
+.empty-icon {
+  width: 72px; height: 72px; border-radius: 20px;
+  background: #e2e8f0; color: #94a3b8;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* Mouvement — AppMotion */
+.motion-fast { transition-duration: 160ms; }
+.motion-base { transition-duration: 280ms; }
+.pressable { transition: transform 160ms cubic-bezier(.33,1,.68,1); }
+.pressable:active { transform: scale(0.97); }
+
+:root.dark .stat-tile,
+:root.dark .chip { background-color: #162032; border-color: #24314d; }
+:root.dark .stat-tile .value { color: #f1f5f9; }
+:root.dark .list-divider { background: #24314d; }
+:root.dark .info-row > .value { color: #f1f5f9; }
+
+
+/* ==========================================================
+   Animations — couche partagée (vitrine + back-office)
+   ========================================================== */
+@keyframes fadeIn      { from{opacity:0;} to{opacity:1;} }
+@keyframes scaleIn     { from{opacity:0; transform:scale(.96);} to{opacity:1; transform:scale(1);} }
+@keyframes popIn       { 0%{opacity:0; transform:scale(.85);} 60%{transform:scale(1.03);} 100%{opacity:1; transform:scale(1);} }
+@keyframes slideInLeft { from{opacity:0; transform:translateX(-14px);} to{opacity:1; transform:translateX(0);} }
+@keyframes countUp     { from{opacity:0; transform:translateY(8px);} to{opacity:1; transform:translateY(0);} }
+@keyframes pulseSoft   { 0%,100%{opacity:1;} 50%{opacity:.55;} }
+@keyframes floatY      { 0%,100%{transform:translateY(0);} 50%{transform:translateY(-6px);} }
+
+.animate-fade-in     { animation: fadeIn .35s ease both; }
+.animate-scale-in    { animation: scaleIn .3s cubic-bezier(.16,1,.3,1) both; }
+.animate-pop-in      { animation: popIn .4s cubic-bezier(.34,1.56,.64,1) both; }
+.animate-slide-left  { animation: slideInLeft .35s cubic-bezier(.16,1,.3,1) both; }
+.animate-count-up    { animation: countUp .5s cubic-bezier(.16,1,.3,1) both; }
+.animate-float       { animation: floatY 4s ease-in-out infinite; }
+
+/* Cascade : à poser sur le conteneur, les enfants suivent. */
+.stagger > * { animation: fadeInUp .45s cubic-bezier(.16,1,.3,1) both; }
+.stagger > *:nth-child(1){animation-delay:.03s;}
+.stagger > *:nth-child(2){animation-delay:.07s;}
+.stagger > *:nth-child(3){animation-delay:.11s;}
+.stagger > *:nth-child(4){animation-delay:.15s;}
+.stagger > *:nth-child(5){animation-delay:.19s;}
+.stagger > *:nth-child(6){animation-delay:.23s;}
+.stagger > *:nth-child(7){animation-delay:.27s;}
+.stagger > *:nth-child(8){animation-delay:.31s;}
+.stagger > *:nth-child(n+9){animation-delay:.35s;}
+
+/* Lignes de tableau : une arrivée discrète, plafonnée pour ne pas traîner. */
+.stagger-rows > tr { animation: fadeIn .3s ease both; }
+.stagger-rows > tr:nth-child(1){animation-delay:.02s;}
+.stagger-rows > tr:nth-child(2){animation-delay:.05s;}
+.stagger-rows > tr:nth-child(3){animation-delay:.08s;}
+.stagger-rows > tr:nth-child(4){animation-delay:.11s;}
+.stagger-rows > tr:nth-child(5){animation-delay:.14s;}
+.stagger-rows > tr:nth-child(6){animation-delay:.17s;}
+.stagger-rows > tr:nth-child(n+7){animation-delay:.2s;}
+
+/* Réactions au survol et au clic. */
+.hover-lift { transition: transform .22s cubic-bezier(.16,1,.3,1), box-shadow .22s ease; }
+.hover-lift:hover { transform: translateY(-3px); box-shadow: 0 14px 30px -14px rgba(15,23,42,.3); }
+.press-scale { transition: transform .16s cubic-bezier(.33,1,.68,1); }
+.press-scale:active { transform: scale(.97); }
+.hover-icon-pop { transition: transform .28s cubic-bezier(.34,1.56,.64,1); }
+.hover-lift:hover .hover-icon-pop,
+.hover-icon-pop:hover { transform: scale(1.1) rotate(-4deg); }
+
+/* Les cartes de statistique respirent au survol. */
+.card-shadow-hover:hover .stat-icon { transform: scale(1.1) rotate(-4deg); }
+.stat-icon { transition: transform .28s cubic-bezier(.34,1.56,.64,1); }
+
+/* Pastille de statut qui vient d'apparaître. */
+.badge-enter { animation: popIn .35s cubic-bezier(.34,1.56,.64,1) both; }
+
+/* Barre de progression qui se remplit depuis la gauche. */
+@keyframes growX { from{transform:scaleX(0);} to{transform:scaleX(1);} }
+.animate-grow-x { transform-origin:left; animation: growX .8s cubic-bezier(.16,1,.3,1) both; }
+
+/* Soulignement des liens de navigation. */
+.link-underline { position:relative; }
+.link-underline::after{
+  content:""; position:absolute; left:0; right:0; bottom:-2px; height:2px; border-radius:2px;
+  background:currentColor; transform:scaleX(0); transform-origin:center;
+  transition:transform .28s cubic-bezier(.4,0,.2,1);
+}
+.link-underline:hover::after{ transform:scaleX(1); }
+
+/* Squelette de chargement : on garde le shimmer existant, on ajoute le fondu. */
+.skeleton-fade { animation: pulseSoft 1.6s ease-in-out infinite; }
 
 /* ── Reduced motion ───────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+  .animate-float, .skeleton-fade { animation: none !important; }
 }

@@ -193,7 +193,7 @@
               <button
                 onclick={() => ouvrirPaiement(cabin)}
                 class="flex items-center gap-1.5 px-4 py-2 rounded-xl text-white text-sm font-bold transition-all hover:scale-105"
-                style="background:linear-gradient(135deg,#f97316,#fbbf24); box-shadow:0 4px 12px rgba(249,115,22,0.3)"
+                style="background:linear-gradient(135deg, #007A5E 0%, #00A878 100%); box-shadow:0 4px 12px rgba(0,122,94,0.3)"
               >
                 <span class="material-symbols-outlined icon-filled" style="font-size:16px">payments</span>
                 Payer

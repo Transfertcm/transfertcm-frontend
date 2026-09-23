@@ -275,14 +275,14 @@
   </div>
 
   {#if chargementPlans}
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <div class="grid grid-cols-1 md:grid-cols-3 stagger gap-4">
       {#each Array(3) as _}<div class="skeleton h-52 rounded-2xl"></div>{/each}
     </div>
   {:else}
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <div class="grid grid-cols-1 md:grid-cols-3 stagger gap-4">
       {#each [
         { key: 'basic',    couleur: '#64748b', label: 'Basic',    icone: 'star' },
-        { key: 'standard', couleur: '#f97316', label: 'Standard', icone: 'star_half' },
+        { key: 'standard', couleur: '#007A5E', label: 'Standard', icone: 'star_half' },
         { key: 'premium',  couleur: '#8b5cf6', label: 'Premium',  icone: 'workspace_premium' },
       ] as plan}
         {@const p = plans[plan.key]}

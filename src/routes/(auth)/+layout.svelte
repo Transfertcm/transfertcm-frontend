@@ -197,7 +197,6 @@
         <img src="/branding/app_icon.svg" alt="" width="36" height="36" class="w-9 h-9 rounded-xl" />
         <div>
           <p class="font-black text-slate-900 text-base leading-none">TransfertCM</p>
-          <p class="text-xs font-semibold mt-0.5" style="color:#007A5E">Crédit, forfaits et mobile money</p>
         </div>
       </div>
 

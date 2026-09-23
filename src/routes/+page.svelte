@@ -102,7 +102,6 @@
       <div class="hero-blob b2"></div>
       <div class="wrap hero-grid">
         <div class="hero-copy">
-          <div class="eyebrow"><span class="dot"></span>Crédit, forfaits et mobile money</div>
           <h1>Crédit et forfaits, <em>en un instant.</em></h1>
           <p class="lead">
             Rechargez votre ligne MTN ou Orange, pour vous ou pour vos proches,

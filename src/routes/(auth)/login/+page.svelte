@@ -14,12 +14,14 @@
   // Dérivé directement depuis l'URL — toujours synchronisé, pas de race condition
   const onglet = $derived<Tab>($page.url.searchParams.get('espace') === 'cabin' ? 'cabin' : 'admin')
 
-  function messageErreur(data: any): string {
-    const msg: string = data?.message ?? ''
-    const MESSAGES_TECHNIQUES = ['introuvable', 'non autorisé', 'connectez-vous', 'row not found', 'unauthorized']
-    const estTechnique = MESSAGES_TECHNIQUES.some(m => msg.toLowerCase().includes(m))
-    if (!msg || estTechnique) return 'Email ou mot de passe incorrect.'
-    return msg
+  function signalerErreur(err: any) {
+    const data = err.response?.data
+    if (err.response?.status === 422) {
+      data?.errors?.forEach((e: any) => { erreurs[e.field] = e.message })
+      return
+    }
+    if (err.toastAffiche) return
+    toast.erreur(translate('toast.error'), data?.message ?? 'Email ou mot de passe incorrect.')
   }
 
   let email = $state('')
@@ -75,19 +77,14 @@
           email: user.email,
           fullName: user.full_name ?? user.fullName ?? null,
           role: user.role ?? 'admin',
-          initials: (user.full_name ?? user.email ?? '?').slice(0, 2).toUpperCase(),
+          initials: user.initials ?? (user.fullName ?? user.full_name ?? user.email ?? '?').slice(0, 2).toUpperCase(),
         },
         token
       )
       toast.succes(translate('toast.success'), translate('auth.login.welcome'))
       goto('/admin/tableau-de-bord')
     } catch (err: any) {
-      const data = err.response?.data
-      if (err.response?.status === 422) {
-        data?.errors?.forEach((e: any) => { erreurs[e.field] = e.message })
-      } else {
-        toast.erreur(translate('toast.error'), messageErreur(data))
-      }
+      signalerErreur(err)
     }
   }
 
@@ -120,12 +117,7 @@
       toast.succes(translate('toast.success'), translate('auth.login.welcome'))
       goto('/cabine/tableau-de-bord')
     } catch (err: any) {
-      const data = err.response?.data
-      if (err.response?.status === 422) {
-        data?.errors?.forEach((e: any) => { erreurs[e.field] = e.message })
-      } else {
-        toast.erreur(translate('toast.error'), messageErreur(data))
-      }
+      signalerErreur(err)
     }
   }
 </script>

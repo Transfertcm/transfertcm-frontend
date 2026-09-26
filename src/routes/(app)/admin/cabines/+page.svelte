@@ -70,7 +70,6 @@
       cabines = res.data?.data ?? []
       meta = res.data?.meta ?? null
     } catch (err: any) {
-      console.error('[cabines] erreur chargement:', err)
       toast.erreur('Erreur', err.response?.data?.message ?? 'Impossible de charger les cabines')
     } finally {
       chargement = false

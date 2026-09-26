@@ -149,7 +149,7 @@
   }
 
   async function seDeconnecter() {
-    try { await api.post('/auth/logout') } catch {}
+    try { await api.post('/account/logout') } catch {}
     auth.logout()
     // Le message est affiché une fois la navigation faite : émis avant,
     // il se monte pendant le changement de page et s'affiche à moitié.

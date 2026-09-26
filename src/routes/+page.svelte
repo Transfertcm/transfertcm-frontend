@@ -389,7 +389,6 @@
               <li><a href="#comment-ca-marche">Comment ça marche</a></li>
               <li><a href="#portefeuille">Portefeuille</a></li>
               <li><a href="#faq">Questions fréquentes</a></li>
-              <li><a href="/about">Qui sommes-nous</a></li>
             </ul>
           </div>
           <div class="foot-col">

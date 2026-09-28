@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import api from '$lib/api'
+  import { auth } from '$lib/stores/auth.svelte'
   import { toast } from '$lib/stores/toast.svelte'
 
   type Onglet = 'urgents' | 'historique' | 'stats'
@@ -18,6 +19,22 @@
   let afficherFormAppel = $state(false)
   let formAppel = $state({ phoneNumber: '', status: 'called', notes: '', callDurationSeconds: '' })
   let envoiAppel = $state(false)
+  let nomsAgents = $state<Record<string, string>>({})
+
+  function nomAgent(id: unknown) {
+    if (id == null || id === '') return '—'
+    return nomsAgents[String(id)] ?? 'Agent inconnu'
+  }
+
+  async function chargerAgents() {
+    try {
+      const res = await api.get('/admin/team')
+      const liste = Array.isArray(res.data?.data) ? res.data.data : []
+      const noms: Record<string, string> = {}
+      for (const u of liste) if (u?.id) noms[String(u.id)] = u.fullName ?? u.email
+      nomsAgents = noms
+    } catch {}
+  }
 
   function formaterDate(d: string | null) {
     if (!d) return '—'
@@ -34,8 +51,7 @@
     chargement = true
     try {
       const res = await api.get('/admin/call-center/urgent-requests')
-      const d = res.data?.data
-      urgents = d?.data ?? d ?? []
+      urgents = Array.isArray(res.data?.data) ? res.data.data : []
     } catch { toast.erreur('Erreur', 'Impossible de charger les demandes urgentes') }
     finally { chargement = false }
   }
@@ -44,9 +60,8 @@
     chargement = true
     try {
       const res = await api.get('/admin/call-center/logs', { params: { page, per_page: 20 } })
-      const d = res.data?.data
-      logs = d?.data ?? d ?? []
-      metaLogs = d?.meta ?? null
+      logs = Array.isArray(res.data?.data) ? res.data.data : []
+      metaLogs = res.data?.meta ?? null
     } catch { toast.erreur('Erreur', 'Impossible de charger l\'historique') }
     finally { chargement = false }
   }
@@ -65,7 +80,7 @@
     try {
       await api.patch(`/admin/call-center/urgent-requests/${id}/handle`)
       toast.succes('Demande traitée')
-      urgents = urgents.map(u => u.id === id ? { ...u, status: 'handled' } : u)
+      urgents = urgents.map(u => u.id === id ? { ...u, status: 'handled', handledBy: auth.user?.email ?? u.handledBy } : u)
     } catch (e: any) {
       toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de traiter')
     } finally { actionEnCours = '' }
@@ -75,16 +90,22 @@
     e.preventDefault()
     envoiAppel = true
     try {
-      await api.post('/admin/call-center/logs', {
-        ...formAppel,
-        callDurationSeconds: formAppel.callDurationSeconds ? Number(formAppel.callDurationSeconds) : null,
-      })
+      const corps: Record<string, unknown> = {
+        phoneNumber: formAppel.phoneNumber.trim(),
+        status: formAppel.status,
+      }
+      if (formAppel.notes.trim()) corps.notes = formAppel.notes.trim()
+      if (formAppel.callDurationSeconds !== '' && formAppel.callDurationSeconds != null) {
+        corps.callDurationSeconds = Number(formAppel.callDurationSeconds)
+      }
+      await api.post('/admin/call-center/logs', corps)
       toast.succes('Appel enregistré')
       afficherFormAppel = false
       formAppel = { phoneNumber: '', status: 'called', notes: '', callDurationSeconds: '' }
       if (onglet === 'historique') chargerLogs()
+      else if (onglet === 'stats') chargerStats()
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible d\'enregistrer')
+      toast.erreur('Erreur', e.response?.data?.errors?.[0]?.message ?? e.response?.data?.message ?? 'Impossible d\'enregistrer')
     } finally { envoiAppel = false }
   }
 
@@ -94,7 +115,7 @@
     else chargerStats()
   })
 
-  onMount(chargerUrgents)
+  onMount(chargerAgents)
 
   const configStatutUrgent: Record<string, { label: string; classe: string }> = {
     pending: { label: 'En attente', classe: 'bg-red-100 text-red-700 border-red-200' },
@@ -102,10 +123,9 @@
   }
 
   const configStatutLog: Record<string, { label: string; classe: string }> = {
-    called:     { label: 'Appelé',        classe: 'bg-blue-100 text-blue-700 border-blue-200' },
-    no_answer:  { label: 'Pas de réponse', classe: 'bg-amber-100 text-amber-700 border-amber-200' },
-    resolved:   { label: 'Résolu',        classe: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
-    callback:   { label: 'Rappel prévu',  classe: 'bg-purple-100 text-purple-700 border-purple-200' },
+    called:             { label: 'Joint',          classe: 'bg-blue-100 text-blue-700 border-blue-200' },
+    not_reached:        { label: 'Injoignable',    classe: 'bg-amber-100 text-amber-700 border-amber-200' },
+    callback_scheduled: { label: 'Rappel prévu',   classe: 'bg-purple-100 text-purple-700 border-purple-200' },
   }
 </script>
 
@@ -158,32 +178,33 @@
       </div>
     {:else}
       <div class="hidden lg:grid grid-cols-12 gap-3 px-5 py-3 bg-slate-50 border-b border-slate-100 text-xs font-semibold text-slate-400 uppercase tracking-wide">
-        <div class="col-span-3">Client</div>
-        <div class="col-span-3">Motif</div>
+        <div class="col-span-4">Client</div>
         <div class="col-span-2">Statut</div>
-        <div class="col-span-2">Date</div>
-        <div class="col-span-2">Action</div>
+        <div class="col-span-3">Date</div>
+        <div class="col-span-3">Action</div>
       </div>
       <div class="divide-y divide-slate-50">
         {#each urgents as u}
           {@const cfg = configStatutUrgent[u.status] ?? configStatutUrgent.pending}
           <div class="flex flex-col gap-2 lg:grid lg:grid-cols-12 lg:gap-3 lg:items-center px-5 py-4 hover:bg-slate-50">
-            <div class="lg:col-span-3 flex items-center gap-2">
+            <div class="lg:col-span-4 flex items-center gap-2">
               <div class="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center shrink-0">
                 <span class="material-symbols-outlined text-red-500 icon-filled" style="font-size:16px">person</span>
               </div>
-              <p class="text-sm font-semibold text-slate-800 font-mono">{u.phone ?? u.member_phone ?? '—'}</p>
-            </div>
-            <div class="lg:col-span-3">
-              <p class="text-xs text-slate-600">{u.reason ?? u.message ?? '—'}</p>
+              <div class="min-w-0">
+                <p class="text-sm font-semibold text-slate-800 font-mono">{u.clientPhone ?? '—'}</p>
+                {#if u.clientName}
+                  <p class="text-xs text-slate-400 truncate">{u.clientName}</p>
+                {/if}
+              </div>
             </div>
             <div class="lg:col-span-2">
               <span class="text-xs font-semibold px-2.5 py-1 rounded-full border {cfg.classe}">{cfg.label}</span>
             </div>
-            <div class="lg:col-span-2">
-              <p class="text-xs text-slate-500">{formaterDate(u.created_at)}</p>
+            <div class="lg:col-span-3">
+              <p class="text-xs text-slate-500">{formaterDate(u.createdAt)}</p>
             </div>
-            <div class="lg:col-span-2">
+            <div class="lg:col-span-3">
               {#if u.status === 'pending'}
                 <button
                   onclick={() => traiterUrgent(u.id)}
@@ -198,7 +219,7 @@
                   Traiter
                 </button>
               {:else}
-                <span class="text-xs text-slate-400">Traité par {u.handled_by ?? '—'}</span>
+                <span class="text-xs text-slate-400">Traité par {u.handledBy ?? '—'}</span>
               {/if}
             </div>
           </div>
@@ -231,20 +252,20 @@
           {@const cfg = configStatutLog[log.status] ?? configStatutLog.called}
           <div class="flex flex-col gap-1.5 lg:grid lg:grid-cols-12 lg:gap-3 lg:items-center px-5 py-4 hover:bg-slate-50">
             <div class="lg:col-span-3">
-              <p class="text-sm font-semibold text-slate-800 font-mono">{log.phone_number ?? '—'}</p>
+              <p class="text-sm font-semibold text-slate-800 font-mono">{log.phoneNumber ?? '—'}</p>
             </div>
             <div class="lg:col-span-2">
               <span class="text-xs font-semibold px-2.5 py-1 rounded-full border {cfg.classe}">{cfg.label}</span>
             </div>
             <div class="lg:col-span-2">
-              <p class="text-sm text-slate-600">{formaterDuree(log.call_duration_seconds)}</p>
+              <p class="text-sm text-slate-600">{formaterDuree(log.callDurationSeconds)}</p>
             </div>
             <div class="lg:col-span-3">
               <p class="text-xs text-slate-500 line-clamp-2">{log.notes ?? '—'}</p>
             </div>
             <div class="lg:col-span-2">
-              <p class="text-xs font-semibold text-slate-700">{log.caller_email ?? '—'}</p>
-              <p class="text-xs text-slate-400">{formaterDate(log.created_at)}</p>
+              <p class="text-xs font-semibold text-slate-700">{nomAgent(log.calledBy)}</p>
+              <p class="text-xs text-slate-400">{formaterDate(log.createdAt)}</p>
             </div>
           </div>
         {/each}
@@ -279,11 +300,11 @@
       <div class="bg-white rounded-2xl border border-slate-100 card-shadow p-5">
         <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Total appels (semaine)</p>
         <p class="font-black text-3xl text-slate-900">{stats.total?.total ?? 0}</p>
-        <p class="text-xs text-slate-500 mt-1">Durée moy. {formaterDuree(Math.round(stats.total?.avg_duration ?? 0))}</p>
+        <p class="text-xs text-slate-500 mt-1">Durée moy. {formaterDuree(Math.round(stats.total?.avgDuration ?? 0))}</p>
       </div>
       {#each (stats.byStatus ?? []) as s}
         <div class="bg-white rounded-2xl border border-slate-100 card-shadow p-5">
-          <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">{configStatutLog[s.status]?.label ?? s.status}</p>
+          <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">{configStatutLog[s.status]?.label ?? 'Autre'}</p>
           <p class="font-black text-3xl text-slate-900">{s.count}</p>
         </div>
       {/each}
@@ -299,13 +320,13 @@
               <div class="flex items-center gap-3">
                 <div class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold"
                   style="background:linear-gradient(135deg, #007A5E 0%, #00A878 100%)">
-                  {(agent.caller_email ?? '?')[0].toUpperCase()}
+                  {nomAgent(agent.calledBy)[0].toUpperCase()}
                 </div>
-                <p class="text-sm font-semibold text-slate-800">{agent.caller_email}</p>
+                <p class="text-sm font-semibold text-slate-800">{nomAgent(agent.calledBy)}</p>
               </div>
               <div class="text-right">
                 <p class="text-sm font-bold text-slate-900">{agent.count} appels</p>
-                <p class="text-xs text-slate-400">Moy. {formaterDuree(Math.round(agent.avg_duration ?? 0))}</p>
+                <p class="text-xs text-slate-400">Moy. {formaterDuree(Math.round(agent.avgDuration ?? 0))}</p>
               </div>
             </div>
           {/each}
@@ -334,17 +355,16 @@
       <form onsubmit={enregistrerAppel} class="p-6 space-y-4">
         <div>
           <label for="phone-appel" class="block text-xs font-semibold text-slate-600 mb-1.5">Numéro appelé *</label>
-          <input id="phone-appel" type="tel" bind:value={formAppel.phoneNumber} required
+          <input id="phone-appel" type="tel" bind:value={formAppel.phoneNumber} required minlength="9" maxlength="20"
             placeholder="+237 6XX XXX XXX"
             class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
         </div>
         <div>
           <label for="statut-appel" class="block text-xs font-semibold text-slate-600 mb-1.5">Résultat</label>
           <select id="statut-appel" bind:value={formAppel.status} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
-            <option value="called">Appelé</option>
-            <option value="no_answer">Pas de réponse</option>
-            <option value="resolved">Résolu</option>
-            <option value="callback">Rappel prévu</option>
+            <option value="called">Joint</option>
+            <option value="not_reached">Injoignable</option>
+            <option value="callback_scheduled">Rappel prévu</option>
           </select>
         </div>
         <div>

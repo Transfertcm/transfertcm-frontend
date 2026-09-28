@@ -4,7 +4,7 @@
   import { toast } from '$lib/stores/toast.svelte'
 
   type Network = 'mtn' | 'orange' | ''
-  type PackageType = 'call' | 'data' | 'sms' | 'combo' | ''
+  type PackageType = 'call' | 'data' | 'sms' | 'combo' | 'credit' | ''
 
   interface Package {
     id: string
@@ -14,7 +14,6 @@
     type: string
     description: string | null
     details: Record<string, any>
-    isActive: boolean
     createdAt: string
   }
 
@@ -25,7 +24,6 @@
   // Filtres
   let filtreNetwork  = $state<Network>('')
   let filtreType     = $state<PackageType>('')
-  let filtreActif    = $state<'all' | 'active' | 'inactive'>('active')
 
   // Modals
   let modalCreer  = $state(false)
@@ -54,6 +52,7 @@
     { key: 'call',  label: 'Appels',     icon: 'call' },
     { key: 'sms',   label: 'SMS',        icon: 'sms' },
     { key: 'combo', label: 'Combo',      icon: 'stars' },
+    { key: 'credit', label: 'Crédit',    icon: 'payments' },
   ]
 
   const TYPE_ICONS: Record<string, string> = {
@@ -61,18 +60,19 @@
     call:  'call',
     sms:   'sms',
     combo: 'stars',
+    credit: 'payments',
   }
+
+  const TYPE_LABELS: Record<string, string> = Object.fromEntries(TYPES.filter(t => t.key).map(t => [t.key, t.label]))
 
   const filtered = $derived(packages.filter(p => {
     if (filtreNetwork && p.network !== filtreNetwork) return false
     if (filtreType && p.type !== filtreType) return false
-    if (filtreActif === 'active' && !p.isActive) return false
-    if (filtreActif === 'inactive' && p.isActive) return false
     return true
   }))
 
-  const countMtn    = $derived(packages.filter(p => p.network === 'mtn' && p.isActive).length)
-  const countOrange = $derived(packages.filter(p => p.network === 'orange' && p.isActive).length)
+  const countMtn    = $derived(packages.filter(p => p.network === 'mtn').length)
+  const countOrange = $derived(packages.filter(p => p.network === 'orange').length)
 
   async function charger() {
     chargement = true
@@ -118,7 +118,8 @@
       modalCreer = false
       await charger()
     } catch (err: any) {
-      toast.erreur('Erreur', err.response?.data?.message ?? 'Impossible de créer')
+      const erreurs = err.response?.data?.errors
+      toast.erreur('Erreur', Array.isArray(erreurs) && erreurs.length ? erreurs.map((x: any) => x.message).join(' • ') : (err.response?.data?.message ?? 'Impossible de créer'))
     } finally { enregistrement = false }
   }
 
@@ -130,7 +131,7 @@
       await api.put(`/packages/${pkgEdite.id}`, {
         name:        form.name,
         price:       Number(form.price),
-        description: form.description || undefined,
+        description: form.description,
       })
       toast.succes('Forfait mis à jour')
       modalEditer = false
@@ -179,12 +180,11 @@
 </div>
 
 <!-- Statistiques rapides -->
-<div class="grid grid-cols-2 md:grid-cols-4 stagger gap-4 mb-5">
+<div class="grid grid-cols-2 md:grid-cols-3 stagger gap-4 mb-5">
   {#each [
-    { label: 'Total actifs', val: packages.filter(p => p.isActive).length, icon: 'inventory_2', color: 'orange' },
+    { label: 'Total actifs', val: packages.length, icon: 'inventory_2', color: 'orange' },
     { label: 'MTN actifs',   val: countMtn,    icon: 'cell_tower', color: 'amber' },
     { label: 'Orange actifs',val: countOrange, icon: 'cell_tower', color: 'orange' },
-    { label: 'Désactivés',   val: packages.filter(p => !p.isActive).length, icon: 'block', color: 'slate' },
   ] as stat}
     <div class="bg-white rounded-2xl border border-slate-100 card-shadow p-4">
       <div class="flex items-center gap-3">
@@ -236,16 +236,6 @@
         </button>
       {/each}
     </div>
-
-    <div class="ml-auto">
-      <select
-        bind:value={filtreActif}
-        class="text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 focus:outline-none focus:border-orange-400">
-        <option value="active">Actifs uniquement</option>
-        <option value="inactive">Désactivés</option>
-        <option value="all">Tous</option>
-      </select>
-    </div>
   </div>
 </div>
 
@@ -288,13 +278,12 @@
             <th class="text-left px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide">Réseau</th>
             <th class="text-left px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide">Type</th>
             <th class="text-right px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide">Prix</th>
-            <th class="text-center px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wide">Statut</th>
             <th class="px-6 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wide">Actions</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-100">
           {#each filtered as pkg}
-            <tr class="hover:bg-slate-50 transition-colors {!pkg.isActive ? 'opacity-60' : ''}">
+            <tr class="hover:bg-slate-50 transition-colors">
               <td class="px-6 py-4">
                 <div class="flex items-center gap-3">
                   <div class="w-9 h-9 rounded-xl flex items-center justify-center shrink-0
@@ -324,17 +313,11 @@
               <td class="px-4 py-4">
                 <span class="flex items-center gap-1 text-xs text-slate-500">
                   <span class="material-symbols-outlined icon-filled" style="font-size:14px">{TYPE_ICONS[pkg.type] ?? 'widgets'}</span>
-                  <span class="capitalize">{pkg.type ?? '—'}</span>
+                  <span>{pkg.type ? (TYPE_LABELS[pkg.type] ?? pkg.type) : '—'}</span>
                 </span>
               </td>
               <td class="px-4 py-4 text-right">
                 <span class="text-sm font-bold text-slate-900">{formaterPrix(pkg.price)}</span>
-              </td>
-              <td class="px-4 py-4 text-center">
-                <span class="text-xs font-semibold px-2.5 py-1 rounded-full
-                  {pkg.isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}">
-                  {pkg.isActive ? 'Actif' : 'Inactif'}
-                </span>
               </td>
               <td class="px-6 py-4">
                 <div class="flex items-center justify-end gap-2">
@@ -344,14 +327,12 @@
                     class="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-700 transition-all">
                     <span class="material-symbols-outlined icon-filled" style="font-size:16px">edit</span>
                   </button>
-                  {#if pkg.isActive}
-                    <button
-                      onclick={() => { pkgAsupprimer = pkg; modalSuppression = true; }}
-                      title="Désactiver"
-                      class="w-8 h-8 rounded-lg hover:bg-red-50 flex items-center justify-center text-slate-400 hover:text-red-500 transition-all">
-                      <span class="material-symbols-outlined icon-filled" style="font-size:16px">block</span>
-                    </button>
-                  {/if}
+                  <button
+                    onclick={() => { pkgAsupprimer = pkg; modalSuppression = true; }}
+                    title="Désactiver"
+                    class="w-8 h-8 rounded-lg hover:bg-red-50 flex items-center justify-center text-slate-400 hover:text-red-500 transition-all">
+                    <span class="material-symbols-outlined icon-filled" style="font-size:16px">block</span>
+                  </button>
                 </div>
               </td>
             </tr>
@@ -361,8 +342,8 @@
     </div>
 
     <div class="px-6 py-3 border-t border-slate-100 bg-slate-50 text-xs text-slate-400">
-      {filtered.length} forfait{filtered.length > 1 ? 's' : ''} affiché{filtered.length > 1 ? 's' : ''}
-      {#if filtreNetwork || filtreType || filtreActif !== 'all'} · filtres actifs{/if}
+      {filtered.length} forfait{filtered.length > 1 ? 's' : ''} actif{filtered.length > 1 ? 's' : ''} affiché{filtered.length > 1 ? 's' : ''}
+      {#if filtreNetwork || filtreType} · filtres actifs{/if} · les forfaits désactivés ne sont pas listés
     </div>
   {/if}
 </div>
@@ -452,7 +433,7 @@
         </div>
         <div class="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-100 text-xs text-slate-500">
           <span class="w-2.5 h-2.5 rounded-full {pkgEdite.network === 'mtn' ? 'bg-amber-400' : 'bg-orange-500'}"></span>
-          <span class="font-semibold uppercase">{pkgEdite.network}</span> · <span class="capitalize">{pkgEdite.type}</span>
+          <span class="font-semibold uppercase">{pkgEdite.network}</span> · <span>{TYPE_LABELS[pkgEdite.type] ?? pkgEdite.type}</span>
           <span class="ml-auto text-slate-400 italic">Réseau et type non modifiables</span>
         </div>
         <div>
@@ -493,7 +474,7 @@
         <h3 class="font-bold text-slate-900 mb-1">Désactiver ce forfait ?</h3>
         <p class="text-sm text-slate-500">
           Le forfait <strong>{pkgAsupprimer.name}</strong> sera masqué et ne sera plus accessible aux clients.
-          Il peut être réactivé ultérieurement.
+          Il disparaîtra aussi de cette liste : sa réactivation n'est pas possible depuis le back-office.
         </p>
         <div class="flex gap-3 mt-6">
           <button onclick={() => { modalSuppression = false; pkgAsupprimer = null; }} class="btn-secondary flex-1 justify-center">Annuler</button>

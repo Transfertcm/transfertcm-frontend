@@ -184,13 +184,13 @@ const fr: Record<string, string> = {
   'admin.dashboard.quota_used':         '{pct}% du quota utilisé',
   'admin.dashboard.uv_units':           'UV',
   'admin.dashboard.period.today':       'Aujourd\'hui',
-  'admin.dashboard.period.week':        'semaine',
-  'admin.dashboard.period.month':       'mois',
+  'admin.dashboard.period.week':        'Cette semaine',
+  'admin.dashboard.period.month':       'Ce mois',
 
   // ── Admin — Commandes ────────────────────────────────────────────────────────
 
   'admin.orders.title':                 'Commandes',
-  'admin.orders.subtitle':              '{total} commandes au total',
+  'admin.orders.subtitle':              '{total} commande(s) au total',
   'admin.orders.subtitle_default':      'Gestion des commandes de transfert',
   'admin.orders.new':                   'Nouvelle commande',
   'admin.orders.all_statuses':          'Tous les statuts',
@@ -229,7 +229,7 @@ const fr: Record<string, string> = {
   // ── Admin — Cabines ──────────────────────────────────────────────────────────
 
   'admin.cabins.title':                 'Cabines',
-  'admin.cabins.subtitle':              '{total} cabines au total',
+  'admin.cabins.subtitle':              '{total} cabine(s) au total',
   'admin.cabins.subtitle_default':      'Gestion des agents terrain',
   'admin.cabins.new':                   'Nouvelle cabine',
   'admin.cabins.search_placeholder':    'Rechercher une cabine...',

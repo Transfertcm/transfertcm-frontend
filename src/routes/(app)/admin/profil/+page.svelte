@@ -15,6 +15,46 @@
   let afficherMdpActuel = $state(false)
   let afficherNouveauMdp = $state(false)
 
+  let erreurProfil = $state('')
+
+  const libellesRoles: Record<string, string> = {
+    super_admin: 'Super Admin', admin: 'Admin', service_client: 'Service client',
+    chef_agents_promo: 'Chef agents promo', controleur_cabine: 'Contrôleur cabine',
+  }
+
+  const libellesPermissions: Record<string, string> = {
+    isSuperAdmin: 'Super administrateur',
+    canViewDashboard: 'Tableau de bord',
+    canViewOrders: 'Voir les commandes',
+    canAssignOrders: 'Assigner les commandes',
+    canViewControl: 'Contrôle',
+    canViewAllocations: 'Allocations',
+    canViewNotifications: 'Notifications',
+    canViewUvNotifications: 'Notifications UV',
+    canViewSettings: 'Paramètres',
+    canManageCabins: 'Gérer les cabines',
+    canManageUsers: 'Gérer les utilisateurs',
+    canViewSalaries: 'Salaires',
+    canViewStatistics: 'Statistiques',
+    canAccessUv: 'Unités de valeur (UV)',
+    canAccessComplaints: 'Réclamations',
+    canAccessCallCenter: 'Centre d\'appels',
+    canViewTciMembers: 'Membres TCI',
+    canViewGifts: 'Cadeaux',
+    canViewReports: 'Voir les rapports',
+    canValidateReports: 'Valider les rapports',
+    canViewPromoAgents: 'Agents promo',
+    canViewClients: 'Clients',
+    canViewQuiz: 'Quiz',
+    canViewWallets: 'Portefeuilles',
+  }
+
+  const permissionsAffichees = $derived(
+    profil?.permissions
+      ? Object.entries(profil.permissions).filter(([k]) => k in libellesPermissions)
+      : []
+  )
+
   function formaterDate(d: string | null) {
     if (!d) return '—'
     return new Date(d).toLocaleDateString('fr-CM', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -43,15 +83,37 @@
   }
 
   async function sauvegarderProfil() {
+    erreurProfil = ''
+    const payload: Record<string, string> = {}
+    const prenom = formProfil.firstName.trim()
+    const nom = formProfil.lastName.trim()
+    const tel = formProfil.phone.replace(/\s+/g, '')
+    const avatar = formProfil.avatarUrl.trim()
+    if (prenom) {
+      if (prenom.length < 2) { erreurProfil = 'Le prénom doit contenir au moins 2 caractères.'; return }
+      payload.firstName = prenom
+    }
+    if (nom) {
+      if (nom.length < 2) { erreurProfil = 'Le nom doit contenir au moins 2 caractères.'; return }
+      payload.lastName = nom
+    }
+    if (tel) {
+      if (!/^(\+?237)?6\d{8}$/.test(tel)) { erreurProfil = 'Téléphone invalide : format attendu 6XXXXXXXX (préfixe 237 facultatif).'; return }
+      payload.phone = tel
+    }
+    if (avatar) {
+      if (!/^https?:\/\/\S+\.\S+/.test(avatar)) { erreurProfil = 'L\'URL de l\'avatar doit commencer par http:// ou https://.'; return }
+      payload.avatarUrl = avatar
+    }
     actionEnCours = 'profil'
     try {
-      await api.put('/account/profile', formProfil)
+      await api.put('/account/profile', payload)
       toast.succes('Profil mis à jour')
-      // Mettre à jour le store auth
-      auth.update({ fullName: `${formProfil.firstName} ${formProfil.lastName}`.trim() })
       await charger()
+      if (profil?.fullName) auth.update({ fullName: profil.fullName })
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de sauvegarder')
+      if (e.response?.status === 422) erreurProfil = 'Certaines informations sont invalides. Vérifiez le téléphone et l\'URL de l\'avatar.'
+      else toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de sauvegarder')
     } finally { actionEnCours = '' }
   }
 
@@ -60,38 +122,20 @@
     actionEnCours = 'mdp'
     try {
       await api.post('/account/change-password', formMdp)
-      toast.succes('Mot de passe modifié', 'Reconnectez-vous sur vos autres appareils')
+      toast.succes('Mot de passe modifié')
       formMdp = { currentPassword: '', newPassword: '', newPasswordConfirmation: '' }
     } catch (e: any) {
       if (e.response?.status === 422) {
-        e.response.data?.errors?.forEach((err: any) => { erreursMdp[err.field] = err.message })
+        e.response.data?.errors?.forEach((err: any) => {
+          erreursMdp[err.field] = err.field === 'newPassword'
+            ? 'Le mot de passe doit contenir entre 8 et 64 caractères.'
+            : err.field === 'newPasswordConfirmation'
+              ? 'La confirmation ne correspond pas au nouveau mot de passe.'
+              : 'Champ obligatoire.'
+        })
       } else {
         toast.erreur('Erreur', e.response?.data?.message ?? e.response?.data?.error ?? 'Impossible de changer le mot de passe')
       }
-    } finally { actionEnCours = '' }
-  }
-
-  async function revoquerSession(id: string) {
-    actionEnCours = id
-    try {
-      await api.delete(`/account/sessions/${id}`)
-      toast.succes('Session révoquée')
-      await charger()
-    } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de révoquer')
-    } finally { actionEnCours = '' }
-  }
-
-  async function revoquerToutesSessions() {
-    actionEnCours = 'all_sessions'
-    try {
-      // Révoquer chaque session individuellement (évite le DELETE sans ID)
-      const sessionsActives = profil?.activeSessions ?? []
-      await Promise.all(sessionsActives.map((s: any) => api.delete(`/account/sessions/${s.id}`).catch(() => {})))
-      toast.succes('Toutes les sessions révoquées')
-      await charger()
-    } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de révoquer')
     } finally { actionEnCours = '' }
   }
 
@@ -113,7 +157,12 @@
     </div>
     <div class="skeleton h-64 rounded-2xl"></div>
   </div>
-{:else if profil}
+{:else if !profil}
+  <div class="bg-white rounded-2xl border border-slate-100 card-shadow py-20 text-center">
+    <p class="text-slate-600 font-semibold">Profil indisponible</p>
+    <button onclick={charger} class="btn-secondary mt-4">Réessayer</button>
+  </div>
+{:else}
   <div class="grid grid-cols-1 lg:grid-cols-3 stagger gap-5">
 
     <!-- Colonne principale -->
@@ -138,12 +187,16 @@
               <p class="font-bold text-slate-900">{profil.profile?.fullName ?? profil.fullName ?? '—'}</p>
               <p class="text-sm text-slate-500">{profil.email}</p>
               <div class="flex gap-1.5 mt-1.5 flex-wrap">
-                {#each (profil.roles ?? []) as role}
-                  <span class="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 font-semibold capitalize">
-                    {role.replace(/_/g, ' ')}
+                {#each [...new Set([profil.role, ...(profil.roles ?? [])].filter(Boolean))] as role}
+                  <span class="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 font-semibold">
+                    {libellesRoles[role] ?? role}
                   </span>
                 {/each}
               </div>
+              <p class="text-xs text-slate-400 mt-1.5">
+                Membre depuis le {formaterDate(profil.createdAt)}
+                {#if profil.profile?.lastLoginAt} · Dernière connexion : {formaterDate(profil.profile.lastLoginAt)}{/if}
+              </p>
             </div>
           </div>
 
@@ -167,6 +220,9 @@
               <input id="prf-avatar" type="url" bind:value={formProfil.avatarUrl} placeholder="https://..." class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
             </div>
           </div>
+          {#if erreurProfil}
+            <p class="text-red-500 text-xs">{erreurProfil}</p>
+          {/if}
           <div class="flex justify-end">
             <button onclick={sauvegarderProfil} disabled={actionEnCours === 'profil'} class="btn-primary">
               {#if actionEnCours === 'profil'}<span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
@@ -245,9 +301,9 @@
           </div>
           <div class="p-5">
             <div class="grid grid-cols-1 gap-2">
-              {#each Object.entries(profil.permissions).filter(([k]) => !['id', 'userId', 'createdAt', 'updatedAt'].includes(k)) as [key, val]}
+              {#each permissionsAffichees as [key, val]}
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-slate-600 capitalize">{key.replace(/([A-Z])/g, ' $1').toLowerCase()}</span>
+                  <span class="text-xs text-slate-600">{libellesPermissions[key]}</span>
                   <span class="w-4 h-4 rounded-full flex items-center justify-center {val ? 'bg-emerald-100' : 'bg-slate-100'}">
                     <span class="material-symbols-outlined icon-filled {val ? 'text-emerald-600' : 'text-slate-400'}" style="font-size:12px">
                       {val ? 'check' : 'close'}
@@ -260,44 +316,6 @@
         </div>
       {/if}
 
-      <!-- Sessions actives -->
-      <div class="bg-white rounded-2xl border border-slate-100 card-shadow overflow-hidden">
-        <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <div class="w-8 h-8 rounded-lg bg-orange-50 flex items-center justify-center">
-              <span class="material-symbols-outlined text-orange-500 icon-filled" style="font-size:18px">devices</span>
-            </div>
-            <h3 class="font-bold text-slate-900">Sessions actives</h3>
-          </div>
-          {#if (profil.activeSessions ?? []).length > 1}
-            <button onclick={revoquerToutesSessions} disabled={actionEnCours === 'all_sessions'}
-              class="text-xs text-red-500 font-semibold hover:text-red-600">
-              Tout révoquer
-            </button>
-          {/if}
-        </div>
-        <div class="divide-y divide-slate-50">
-          {#if (profil.activeSessions ?? []).length === 0}
-            <div class="py-8 text-center text-slate-400 text-sm">Aucune session active</div>
-          {:else}
-            {#each profil.activeSessions as sess}
-              <div class="flex items-start gap-3 px-5 py-3.5">
-                <div class="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center shrink-0 mt-0.5">
-                  <span class="material-symbols-outlined text-slate-500" style="font-size:16px">computer</span>
-                </div>
-                <div class="flex-1 min-w-0">
-                  <p class="text-xs font-semibold text-slate-700 truncate">{sess.ipAddress ?? '—'}</p>
-                  <p class="text-xs text-slate-400 mt-0.5">{formaterDate(sess.createdAt)}</p>
-                </div>
-                <button onclick={() => revoquerSession(sess.id)} disabled={actionEnCours === sess.id}
-                  class="text-xs text-red-500 hover:text-red-600 font-medium shrink-0 disabled:opacity-50">
-                  {actionEnCours === sess.id ? '...' : 'Révoquer'}
-                </button>
-              </div>
-            {/each}
-          {/if}
-        </div>
-      </div>
     </div>
   </div>
 {/if}

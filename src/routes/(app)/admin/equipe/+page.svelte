@@ -21,11 +21,12 @@
   let modalCreer = $state(false)
   let formCreer = $state({ fullName: '', email: '', password: '', role: 'admin' as AdminRole })
   let envoiCreer = $state(false)
+  let erreurCreer = $state('')
 
   // Modal édition
   let modalEditer = $state(false)
   let adminEnEdition = $state<AdminMember | null>(null)
-  let formEditer = $state({ fullName: '', role: 'admin' as AdminRole, isActive: true, password: '' })
+  let formEditer = $state({ fullName: '', role: 'admin' as AdminRole, isActive: true })
   let envoiEditer = $state(false)
 
   // Confirmation suppression
@@ -51,7 +52,7 @@
     chargement = true
     try {
       const res = await api.get('/admin/team')
-      equipe = res.data?.data ?? []
+      equipe = (res.data?.data ?? []).filter((a: AdminMember) => (a.role as string) !== 'cabin')
     } catch {
       toast.erreur('Erreur', 'Impossible de charger l\'équipe')
     } finally {
@@ -59,17 +60,39 @@
     }
   }
 
+  const libellesChamps: Record<string, string> = {
+    fullName: 'Nom complet', email: 'Email', password: 'Mot de passe', role: 'Rôle',
+  }
+
+  function ouvrirCreation() {
+    erreurCreer = ''
+    modalCreer = true
+  }
+
   async function creerAdmin() {
-    if (!formCreer.fullName.trim() || !formCreer.email.trim() || !formCreer.password) return
+    erreurCreer = ''
+    if (formCreer.fullName.trim().length < 2) { erreurCreer = 'Le nom complet est obligatoire (2 caractères minimum).'; return }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formCreer.email.trim())) { erreurCreer = 'Adresse email invalide.'; return }
+    if (formCreer.password.length < 8) { erreurCreer = 'Le mot de passe doit contenir au moins 8 caractères.'; return }
     envoiCreer = true
     try {
-      const res = await api.post('/admin/team', formCreer)
-      equipe = [...equipe, res.data?.data]
+      const res = await api.post('/admin/team', { ...formCreer, fullName: formCreer.fullName.trim(), email: formCreer.email.trim() })
+      const cree = res.data?.data
+      if (!cree?.id) {
+        erreurCreer = cree?.error ?? 'Impossible de créer le compte'
+        return
+      }
+      equipe = [...equipe, cree]
       modalCreer = false
       formCreer = { fullName: '', email: '', password: '', role: 'admin' }
-      toast.succes('Admin créé', `${res.data?.data?.fullName} peut maintenant se connecter.`)
+      toast.succes('Admin créé', `${cree.fullName} peut maintenant se connecter.`)
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de créer le compte')
+      const champs = e.response?.data?.errors
+      if (e.response?.status === 422 && Array.isArray(champs) && champs.length) {
+        erreurCreer = 'Champ(s) invalide(s) : ' + [...new Set(champs.map((x: any) => libellesChamps[x.field] ?? x.field))].join(', ')
+      } else {
+        erreurCreer = e.response?.data?.message ?? 'Impossible de créer le compte'
+      }
     } finally {
       envoiCreer = false
     }
@@ -77,7 +100,7 @@
 
   function ouvrirEdition(admin: AdminMember) {
     adminEnEdition = admin
-    formEditer = { fullName: admin.fullName ?? '', role: admin.role, isActive: admin.isActive, password: '' }
+    formEditer = { fullName: admin.fullName ?? '', role: admin.role, isActive: admin.isActive }
     modalEditer = true
   }
 
@@ -90,7 +113,6 @@
         role: formEditer.role,
         isActive: formEditer.isActive,
       }
-      if (formEditer.password) payload.password = formEditer.password
       const res = await api.put(`/admin/team/${adminEnEdition.id}`, payload)
       equipe = equipe.map(a => a.id === adminEnEdition!.id ? { ...a, ...res.data?.data } : a)
       modalEditer = false
@@ -128,7 +150,7 @@
     <p class="text-sm text-slate-500 mt-0.5">Gérez les comptes et rôles des administrateurs</p>
   </div>
   <button
-    onclick={() => modalCreer = true}
+    onclick={ouvrirCreation}
     class="flex items-center gap-2 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-xl font-semibold text-sm transition-all"
   >
     <span class="material-symbols-outlined" style="font-size:18px">person_add</span>
@@ -287,12 +309,15 @@
             {/each}
           </select>
         </div>
+        {#if erreurCreer}
+          <p class="text-red-500 text-xs">{erreurCreer}</p>
+        {/if}
         <div class="flex gap-2 pt-2">
           <button onclick={() => modalCreer = false}
             class="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-600 hover:bg-slate-50">
             Annuler
           </button>
-          <button onclick={creerAdmin} disabled={envoiCreer || !formCreer.email || !formCreer.password}
+          <button onclick={creerAdmin} disabled={envoiCreer}
             class="flex-1 py-2.5 rounded-xl bg-orange-500 text-white text-sm font-semibold hover:bg-orange-600 disabled:opacity-50 flex items-center justify-center gap-2">
             {#if envoiCreer}
               <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
@@ -347,11 +372,6 @@
               Désactivé
             </button>
           </div>
-        </div>
-        <div>
-          <label class="block text-xs font-semibold text-slate-600 mb-1.5">Nouveau mot de passe <span class="text-slate-400 font-normal">(laisser vide pour ne pas changer)</span></label>
-          <input bind:value={formEditer.password} type="password" placeholder="Min. 8 caractères"
-            class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-orange-300" />
         </div>
         <div class="flex gap-2 pt-2">
           <button onclick={() => modalEditer = false}

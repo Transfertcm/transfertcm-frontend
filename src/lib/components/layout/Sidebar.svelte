@@ -53,6 +53,14 @@
 
   const role = $derived(auth.user?.role ?? 'admin')
 
+  const libellesRoles: Record<string, string> = {
+    super_admin: 'Super admin',
+    admin: 'Admin',
+    service_client: 'Service client',
+    chef_agents_promo: 'Chef agents promo',
+    controleur_cabine: 'Contrôleur cabine',
+  }
+
   // Liens directs (sans sous-menu)
   type LienDirect = { href: string; icone: string; labelKey: string; badge: number; roles: string[] }
   const liensDirects = $derived<LienDirect[]>([
@@ -308,7 +316,7 @@
           <p class="text-slate-800 text-sm font-semibold truncate leading-none">
             {auth.user?.fullName ?? auth.user?.email ?? 'Admin'}
           </p>
-          <p class="text-slate-400 text-xs mt-0.5 capitalize">{auth.user?.role?.replace('_', ' ') ?? ''}</p>
+          <p class="text-slate-400 text-xs mt-0.5">{libellesRoles[auth.user?.role ?? ''] ?? auth.user?.role ?? ''}</p>
         </div>
       {/if}
     </a>

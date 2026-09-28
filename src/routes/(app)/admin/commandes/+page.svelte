@@ -1,8 +1,10 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { untrack } from 'svelte'
+  import { page as pageApp } from '$app/stores'
+  import { goto } from '$app/navigation'
   import api from '$lib/api'
   import { toast } from '$lib/stores/toast.svelte'
-  import Badge from '$lib/components/ui/Badge.svelte'
+  import Badge, { libelleStatut, libelleService } from '$lib/components/ui/Badge.svelte'
   import { t, translate } from '$lib/stores/locale'
   import { formatOrderCode } from '$lib/reference'
 
@@ -15,6 +17,8 @@
   let filtreStatut = $state('')
   let filtreReseau = $state('')
   let filtreService = $state('')
+  let filtreCabine = $state('')
+  let nomCabineFiltre = $state('')
   let page = $state(1)
   let perPage = 20
 
@@ -63,29 +67,84 @@
   let nouvelleCommande = $state({
     customerPhone: '',
     recipientPhone: '',
-    serviceType: 'transfert',
+    serviceType: 'credit',
     network: 'mtn',
     amount: '',
+    packageName: '',
     paymentMethod: 'mobile_money',
     expectedPayerPhone: '',
   })
+
+  let forfaits = $state<any[]>([])
+  const forfaitsReseau = $derived(forfaits.filter((f) => f.network === nouvelleCommande.network && f.type !== 'credit'))
+
+  async function ouvrirCreation() {
+    erreurs = {}
+    erreurGenerale = ''
+    afficherModal = true
+    if (forfaits.length === 0) {
+      try {
+        const res = await api.get('/packages')
+        forfaits = res.data?.data ?? []
+      } catch {
+        forfaits = []
+      }
+    }
+  }
+
+  function choisirForfait(nom: string) {
+    nouvelleCommande.packageName = nom
+    const forfait = forfaitsReseau.find((f) => f.name === nom)
+    if (forfait?.price) nouvelleCommande.amount = String(forfait.price)
+  }
   let erreurs = $state<Record<string, string>>({})
+  let erreurGenerale = $state('')
+
+  const servicesDisponibles = [
+    { val: 'credit',   label: 'Crédit' },
+    { val: 'package',  label: 'Forfait' },
+    { val: 'transfer', label: 'Transfert' },
+  ]
+
+  const libellesChamps: Record<string, string> = {
+    customerPhone: 'Téléphone client',
+    recipientPhone: 'Téléphone destinataire',
+    serviceType: 'Service',
+    network: 'Réseau',
+    amount: 'Montant',
+    packageName: 'Forfait',
+    paymentMethod: 'Méthode de paiement',
+    expectedPayerPhone: 'Téléphone payeur attendu',
+  }
+
+  function messageValidation(err: any) {
+    const meta = err.meta ?? {}
+    switch (err.rule) {
+      case 'required': return 'Champ obligatoire'
+      case 'minLength': return `Au moins ${meta.min} caractères`
+      case 'maxLength': return `Au plus ${meta.max} caractères`
+      case 'regex': return 'Numéro camerounais invalide (ex. 6XXXXXXXX)'
+      case 'enum': return 'Valeur non acceptée'
+      case 'number': return 'Nombre attendu'
+      case 'min': return `Minimum ${meta.min}`
+      case 'max': return `Maximum ${meta.max}`
+      default: return err.message ?? 'Valeur invalide'
+    }
+  }
   let creationEnCours = $state(false)
 
   const statuts = $derived([
     { val: '', label: $t('admin.orders.all_statuses') },
-    { val: 'pending', label: $t('status.pending') },
-    { val: 'pending_admin_review', label: $t('status.pending_admin_review') },
-    { val: 'admin_approved', label: $t('status.admin_approved') },
-    { val: 'assigned_to_cabin', label: $t('status.assigned_to_cabin') },
-    { val: 'awaiting_payment', label: $t('status.awaiting_payment') },
-    { val: 'in_progress', label: $t('status.in_progress') },
-    { val: 'completed', label: $t('status.completed') },
-    { val: 'cancelled', label: $t('status.cancelled') },
-    { val: 'rejected', label: $t('status.rejected') },
-    { val: 'payment_failed', label: $t('status.payment_failed') },
-    { val: 'refunded', label: $t('status.refunded') },
+    ...[
+      'pending', 'pending_admin_review', 'admin_approved', 'pending_payment', 'awaiting_payment',
+      'allocated', 'assigned_to_cabin', 'in_progress', 'completed', 'returned_to_admin',
+      'cancelled', 'rejected', 'payment_failed', 'payment_timeout', 'expired', 'refunded',
+    ].map((val) => ({ val, label: libelleStatut(val, $t) })),
   ])
+
+  function normaliserTelephone(valeur: string) {
+    return valeur.replace(/[\s.-]/g, '').replace(/^\+?237(?=\d{9}$)/, '')
+  }
 
   function formaterMontant(n: any) {
     const num = Number(n)
@@ -107,7 +166,9 @@
       if (filtreStatut) params.status = filtreStatut
       if (filtreReseau) params.network = filtreReseau
       if (filtreService) params.service_type = filtreService
-      if (recherche) params.search = recherche
+      if (filtreCabine) params.cabin_id = filtreCabine
+      const telephone = normaliserTelephone(recherche.trim())
+      if (telephone) params.customer_phone = telephone
 
       const res = await api.get('/admin/orders', { params })
       commandes = res.data?.data ?? []
@@ -152,8 +213,9 @@
     chargementAction = id + '_lien'
     try {
       const res = await api.post(`/admin/orders/${id}/payment-link`)
-      lienPaiement = res.data?.data?.paymentUrl ?? res.data?.paymentUrl ?? null
+      lienPaiement = res.data?.data?.paymentUrl ?? null
       if (lienPaiement) afficherModalLien = true
+      else if (res.data?.data?.confirmed) toast.succes('Paiement confirmé', 'Confirmé automatiquement (paiement en mode simulation)')
       else toast.succes('Lien de paiement généré')
       await charger()
     } catch (e: any) {
@@ -178,6 +240,7 @@
 
   async function creerCommande() {
     erreurs = {}
+    erreurGenerale = ''
     creationEnCours = true
     try {
       const payload: any = {
@@ -188,18 +251,31 @@
         paymentMethod: nouvelleCommande.paymentMethod,
       }
       if (nouvelleCommande.amount) payload.amount = Number(nouvelleCommande.amount)
+      if (nouvelleCommande.serviceType === 'package' && forfaitsReseau.some((f) => f.name === nouvelleCommande.packageName)) payload.packageName = nouvelleCommande.packageName
       if (nouvelleCommande.expectedPayerPhone) payload.expectedPayerPhone = nouvelleCommande.expectedPayerPhone
 
-      await api.post('/admin/orders', payload)
+      const res = await api.post('/admin/orders', payload)
       toast.succes(translate('admin.orders.created'))
       afficherModal = false
-      nouvelleCommande = { customerPhone: '', recipientPhone: '', serviceType: 'transfert', network: 'mtn', amount: '', paymentMethod: 'mobile_money', expectedPayerPhone: '' }
+      nouvelleCommande = { customerPhone: '', recipientPhone: '', serviceType: 'credit', network: 'mtn', amount: '', packageName: '', paymentMethod: 'mobile_money', expectedPayerPhone: '' }
+      const urlPaiement = res.data?.data?.paymentUrl ?? null
+      if (urlPaiement) {
+        lienPaiement = urlPaiement
+        afficherModalLien = true
+      }
       await charger()
     } catch (e: any) {
-      if (e.response?.status === 422) {
-        e.response.data?.errors?.forEach((err: any) => { erreurs[err.field] = err.message })
+      const liste = e.response?.data?.errors
+      if (e.response?.status === 422 && Array.isArray(liste)) {
+        const autres: string[] = []
+        liste.forEach((err: any) => {
+          const message = messageValidation(err)
+          if (err.field === 'customerPhone' || err.field === 'recipientPhone') erreurs[err.field] = message
+          else autres.push(`${libellesChamps[err.field] ?? err.field} : ${message}`)
+        })
+        erreurGenerale = autres.join(' · ')
       } else {
-        toast.erreur(translate('toast.error'), e.response?.data?.message ?? translate('common.error_save'))
+        erreurGenerale = e.response?.data?.message ?? translate('common.error_save')
       }
     } finally {
       creationEnCours = false
@@ -212,8 +288,27 @@
     rechercheTimer = setTimeout(() => { page = 1; charger() }, 400)
   }
 
-  $effect(() => { filtreStatut; filtreReseau; filtreService; page; charger() })
-  onMount(charger)
+  const rechercheUrl = $derived($pageApp.url.search)
+  $effect(() => {
+    const q = new URLSearchParams(rechercheUrl)
+    untrack(() => {
+      filtreCabine = q.get('cabin') ?? ''
+      const statutUrl = q.get('status')
+      if (statutUrl) filtreStatut = statutUrl
+      page = 1
+    })
+  })
+
+  $effect(() => {
+    const id = filtreCabine
+    nomCabineFiltre = ''
+    if (!id) return
+    api.get(`/cabins/${id}`)
+      .then((res) => { if (filtreCabine === id) nomCabineFiltre = res.data?.data?.name ?? '' })
+      .catch(() => {})
+  })
+
+  $effect(() => { filtreStatut; filtreReseau; filtreService; filtreCabine; page; charger() })
 </script>
 
 <svelte:head><title>{$t('admin.orders.title')} — {$t('common.app_name')}</title></svelte:head>
@@ -226,7 +321,7 @@
       {meta ? $t('admin.orders.subtitle', { total: meta.total ?? 0 }) : $t('admin.orders.subtitle_default')}
     </p>
   </div>
-  <button onclick={() => afficherModal = true} class="btn-primary">
+  <button onclick={ouvrirCreation} class="btn-primary">
     <span class="material-symbols-outlined icon-filled" style="font-size:18px">add</span>
     {$t('admin.orders.new')}
   </button>
@@ -239,7 +334,8 @@
       <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" style="font-size:16px">search</span>
       <input
         type="text"
-        placeholder={$t('admin.orders.search_placeholder')}
+        placeholder="N° client exact (6XXXXXXXX)"
+        title="Le filtre porte sur le numéro exact du client"
         bind:value={recherche}
         oninput={surRecherche}
         class="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm"
@@ -257,12 +353,26 @@
     </select>
     <select bind:value={filtreService} class="px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
       <option value="">{$t('admin.orders.all_services')}</option>
-      <option value="transfert">{$t('admin.orders.service.transfer')}</option>
-      <option value="retrait">{$t('admin.orders.service.withdrawal')}</option>
-      <option value="depot">{$t('admin.orders.service.deposit')}</option>
-      <option value="paiement">{$t('admin.orders.service.payment')}</option>
+      {#each servicesDisponibles as s}
+        <option value={s.val}>{s.label}</option>
+      {/each}
     </select>
   </div>
+  {#if filtreCabine}
+    <div class="mt-3 flex items-center gap-2">
+      <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-orange-50 border border-orange-200 text-xs font-semibold text-orange-700">
+        <span class="material-symbols-outlined" style="font-size:14px">store</span>
+        Cabine : {nomCabineFiltre || filtreCabine.slice(0, 8)}
+        <button
+          onclick={() => goto(filtreStatut ? `/admin/commandes?status=${filtreStatut}` : '/admin/commandes')}
+          class="ml-0.5 w-4 h-4 rounded-full hover:bg-orange-100 flex items-center justify-center"
+          aria-label="Retirer le filtre cabine"
+        >
+          <span class="material-symbols-outlined" style="font-size:12px">close</span>
+        </button>
+      </span>
+    </div>
+  {/if}
 </div>
 
 <!-- Tableau -->
@@ -324,7 +434,7 @@
           </div>
           <!-- Service -->
           <div class="lg:col-span-1">
-            <span class="text-xs text-slate-500 capitalize">{cmd.serviceType ?? cmd.service_type ?? '—'}</span>
+            <span class="text-xs text-slate-500">{libelleService(cmd.serviceType)}</span>
           </div>
           <!-- Statut -->
           <div class="lg:col-span-2">
@@ -346,7 +456,7 @@
                 Assigner
               </button>
             {/if}
-            {#if ['pending', 'pending_admin_review', 'awaiting_payment'].includes(cmd.status)}
+            {#if ['pending', 'pending_admin_review', 'awaiting_payment'].includes(cmd.status) && cmd.amount && !cmd.paymentVerified}
               <button
                 onclick={() => creerLienPaiement(cmd.id)}
                 disabled={!!chargementAction}
@@ -444,7 +554,7 @@
               <span class="material-symbols-outlined text-amber-500 shrink-0 mt-0.5" style="font-size:18px">warning</span>
               <div>
                 <p class="text-sm font-semibold text-amber-800">Aucune cabine connectée</p>
-                <p class="text-xs text-amber-600 mt-0.5">La commande sera assignée automatiquement à la meilleure cabine disponible dès qu'une se connecte.</p>
+                <p class="text-xs text-amber-600 mt-0.5">Vous pouvez tout de même assigner automatiquement : le système choisit la meilleure cabine éligible (active, abonnement valide, quota disponible), même hors ligne. Sans action, une commande en révision est assignée automatiquement après 5 minutes.</p>
               </div>
             </div>
 
@@ -580,10 +690,9 @@
           <div>
             <label for="service-type" class="block text-xs font-semibold text-slate-600 mb-1.5">{$t('admin.orders.service_type')} *</label>
             <select id="service-type" bind:value={nouvelleCommande.serviceType} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
-              <option value="transfert">{$t('admin.orders.service.transfer')}</option>
-              <option value="retrait">{$t('admin.orders.service.withdrawal')}</option>
-              <option value="depot">{$t('admin.orders.service.deposit')}</option>
-              <option value="paiement">{$t('admin.orders.service.payment')}</option>
+              {#each servicesDisponibles as s}
+                <option value={s.val}>{s.label}</option>
+              {/each}
             </select>
           </div>
           <div>
@@ -594,10 +703,21 @@
             </select>
           </div>
         </div>
+        {#if nouvelleCommande.serviceType === 'package'}
+          <div>
+            <label for="package-name" class="block text-xs font-semibold text-slate-600 mb-1.5">Forfait</label>
+            <select id="package-name" value={nouvelleCommande.packageName} onchange={(e) => choisirForfait((e.target as HTMLSelectElement).value)} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
+              <option value="">Choisir un forfait</option>
+              {#each forfaitsReseau as f}
+                <option value={f.name}>{f.name} — {formaterMontant(f.price)}</option>
+              {/each}
+            </select>
+          </div>
+        {/if}
         <div class="grid grid-cols-2 gap-4">
           <div>
             <label for="amount" class="block text-xs font-semibold text-slate-600 mb-1.5">{$t('common.amount')} (XAF)</label>
-            <input id="amount" type="number" bind:value={nouvelleCommande.amount} placeholder="5000" min="0" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
+            <input id="amount" type="number" bind:value={nouvelleCommande.amount} placeholder="5000" min="100" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
           </div>
           <div>
             <label for="payment-method" class="block text-xs font-semibold text-slate-600 mb-1.5">{$t('admin.orders.payment_method')}</label>
@@ -611,6 +731,9 @@
           <label for="expected-payer-phone" class="block text-xs font-semibold text-slate-600 mb-1.5">{$t('admin.orders.expected_payer')}</label>
           <input id="expected-payer-phone" type="tel" bind:value={nouvelleCommande.expectedPayerPhone} placeholder="6XXXXXXXX" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
         </div>
+        {#if erreurGenerale}
+          <p class="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-3">{erreurGenerale}</p>
+        {/if}
         <div class="flex gap-3 pt-2">
           <button type="button" onclick={() => afficherModal = false} class="btn-secondary flex-1">{$t('common.cancel')}</button>
           <button type="submit" disabled={creationEnCours} class="btn-primary flex-1 justify-center">

@@ -6,6 +6,7 @@
   import { toast } from '$lib/stores/toast.svelte'
   import Badge from '$lib/components/ui/Badge.svelte'
   import StatCard from '$lib/components/ui/StatCard.svelte'
+  import { t } from '$lib/stores/locale'
 
   const id = $derived($page.params.id)
 
@@ -39,6 +40,10 @@
     if (!d) return '—'
     return new Date(d).toLocaleDateString('fr-CM', { day: 'numeric', month: 'long', year: 'numeric' })
   }
+
+  const expirationDepassee = $derived(
+    !!cabine?.subscriptionExpiry && new Date(cabine.subscriptionExpiry).getTime() < Date.now()
+  )
 
   function formaterMontant(n: any) {
     const num = Number(n)
@@ -86,11 +91,10 @@
       form = {
         name: cabine.name, managerName: cabine.managerName ?? cabine.manager_name,
         email: cabine.email, phone: cabine.phone, city: cabine.city,
-        location: cabine.location, type: cabine.type,
-        mtnNumber: cabine.mtnNumber ?? cabine.mtn_number,
-        orangeNumber: cabine.orangeNumber ?? cabine.orange_number,
-        maxDailyOrders: cabine.maxDailyOrders ?? cabine.max_daily_orders,
-        maxOrderAmount: cabine.maxOrderAmount ?? cabine.max_order_amount,
+        location: cabine.location,
+        mtnNumber: cabine.mtnNumber,
+        orangeNumber: cabine.orangeNumber,
+        maxDailyOrders: cabine.maxDailyOrders,
       }
     } catch {
       toast.erreur('Erreur', 'Cabine introuvable')
@@ -181,12 +185,20 @@
   async function sauvegarder() {
     actionEnCours = 'editer'
     try {
-      await api.put(`/cabins/${id}`, form)
+      const payload: any = {}
+      for (const [cle, val] of Object.entries(form)) {
+        if (val === null || val === undefined || val === '') continue
+        payload[cle] = ['phone', 'mtnNumber', 'orangeNumber'].includes(cle) ? String(val).replace(/[\s\-]/g, '') : val
+      }
+      if (payload.maxDailyOrders !== undefined) payload.maxDailyOrders = Number(payload.maxDailyOrders)
+      await api.put(`/cabins/${id}`, payload)
       toast.succes('Cabine mise à jour')
       afficherModalEditer = false
       await charger()
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de sauvegarder')
+      const erreurs = e.response?.data?.errors
+      const detail = Array.isArray(erreurs) && erreurs.length ? erreurs.map((x: any) => x.message).join(' • ') : null
+      toast.erreur('Erreur', detail ?? e.response?.data?.message ?? 'Impossible de sauvegarder')
     } finally { actionEnCours = '' }
   }
 
@@ -213,7 +225,7 @@
   </div>
   {#if cabine}
     <div class="flex items-center gap-2 flex-wrap">
-      <Badge statut={cabine.status ?? 'inactive'} />
+      <Badge statut={cabine.paused && cabine.status === 'active' ? 'paused' : (cabine.status ?? 'inactive')} />
       <button onclick={() => afficherModalEditer = true} class="btn-secondary">
         <span class="material-symbols-outlined icon-filled" style="font-size:16px">edit</span>
         Modifier
@@ -268,7 +280,7 @@
       sousTitre="Max : {cabine.maxDailyOrders ?? cabine.max_daily_orders ?? '∞'}" />
     <StatCard titre="Solde UV" valeur={cabine.uvBalance ?? cabine.uv_balance ?? 0} icone="bolt" couleur="jaune" />
     <StatCard titre="Total commandes" valeur={stats?.totals?.total ?? '—'} icone="bar_chart" couleur="bleu" />
-    <StatCard titre="Chiffre d'affaires" valeur={stats?.totals?.total_amount ? (Number(stats.totals.total_amount) / 1000).toFixed(0) + ' K XAF' : '—'} icone="payments" couleur="vert" />
+    <StatCard titre="Chiffre d'affaires" valeur={stats?.totals ? formaterMontant(stats.totals.totalAmount ?? 0) : '—'} icone="payments" couleur="vert" />
   </div>
 
   <div class="grid grid-cols-1 lg:grid-cols-3 stagger gap-5">
@@ -288,7 +300,7 @@
           {#each [
             { label: 'Nom', val: cabine.name },
             { label: 'Responsable', val: cabine.managerName ?? cabine.manager_name },
-            { label: 'Type', val: cabine.type },
+            { label: 'Type', val: cabine.type ? $t(`admin.cabins.type.${cabine.type}`) : null },
             { label: 'Email', val: cabine.email },
             { label: 'Téléphone', val: cabine.phone },
             { label: 'Ville', val: cabine.city },
@@ -298,7 +310,7 @@
             {#if info.val}
               <div>
                 <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">{info.label}</p>
-                <p class="text-sm font-semibold text-slate-800 capitalize">{info.val}</p>
+                <p class="text-sm font-semibold text-slate-800 break-words">{info.val}</p>
               </div>
             {/if}
           {/each}
@@ -354,24 +366,6 @@
             <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Max commandes/jour</p>
             <p class="text-sm font-bold text-slate-900">{cabine.maxDailyOrders ?? cabine.max_daily_orders ?? '—'}</p>
           </div>
-          <div>
-            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Montant max/commande</p>
-            <p class="text-sm font-bold text-slate-900">{formaterMontant(cabine.maxOrderAmount ?? cabine.max_order_amount)}</p>
-          </div>
-          <div>
-            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Quota total</p>
-            <p class="text-sm font-bold text-slate-900">{cabine.totalOrdersQuota ?? cabine.total_orders_quota ?? '—'}</p>
-          </div>
-          <div>
-            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Quota bloqué</p>
-            <p class="text-sm font-semibold {(cabine.quotaBlocked ?? cabine.quota_blocked) ? 'text-red-600' : 'text-emerald-600'}">
-              {(cabine.quotaBlocked ?? cabine.quota_blocked) ? 'Oui' : 'Non'}
-            </p>
-          </div>
-          <div>
-            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Notification</p>
-            <p class="text-sm font-semibold text-slate-800 capitalize">{cabine.notificationType ?? cabine.notification_type ?? '—'}</p>
-          </div>
         </div>
         <!-- Barre de progression quotidienne -->
         {#if (cabine.maxDailyOrders ?? cabine.max_daily_orders ?? 0) > 0}
@@ -399,7 +393,7 @@
           <div class="p-5 grid grid-cols-2 sm:grid-cols-3 gap-3">
             {#each stats.byStatus as s}
               <div class="p-3 rounded-xl bg-slate-50 border border-slate-100">
-                <p class="text-xs text-slate-400 capitalize mb-1">{(s.status ?? '').replace(/_/g, ' ')}</p>
+                <p class="text-xs text-slate-400 mb-1">{$t(`status.${s.status}`)}</p>
                 <p class="text-lg font-black text-slate-900">{s.count}</p>
               </div>
             {/each}
@@ -426,14 +420,11 @@
           </div>
           <div class="flex justify-between">
             <span class="text-sm text-slate-500">Expiration</span>
-            <span class="text-sm font-semibold text-slate-800">{formaterDate(cabine.subscriptionExpiry ?? cabine.subscription_expiry)}</span>
+            <span class="text-sm font-semibold {expirationDepassee ? 'text-red-600' : 'text-slate-800'}">{formaterDate(cabine.subscriptionExpiry)}</span>
           </div>
-          <div class="flex justify-between">
-            <span class="text-sm text-slate-500">Renouvellement auto</span>
-            <span class="text-sm font-semibold {cabine.autoRenew ?? cabine.auto_renew ? 'text-emerald-600' : 'text-slate-400'}">
-              {cabine.autoRenew ?? cabine.auto_renew ? 'Activé' : 'Désactivé'}
-            </span>
-          </div>
+          {#if expirationDepassee}
+            <p class="text-xs text-red-600">La date d'expiration est dépassée.</p>
+          {/if}
           {#if (cabine.subscriptionStatus ?? cabine.subscription_status ?? 'inactive') !== 'active'}
             <button onclick={() => afficherModalActiverAbo = true}
               class="w-full mt-1 px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 flex items-center justify-center gap-1.5">
@@ -448,19 +439,10 @@
         </div>
       </div>
 
-      <!-- Suspension / Pause -->
-      {#if cabine.suspensionReason ?? cabine.suspension_reason}
-        <div class="bg-red-50 border border-red-200 rounded-2xl p-5">
-          <p class="text-xs font-bold text-red-700 uppercase tracking-wide mb-2">Raison de suspension</p>
-          <p class="text-sm text-red-700">{cabine.suspensionReason ?? cabine.suspension_reason}</p>
-          <p class="text-xs text-red-500 mt-2">Le {formaterDate(cabine.suspensionDate ?? cabine.suspension_date)}</p>
-        </div>
-      {/if}
-      {#if cabine.paused && (cabine.pauseReason ?? cabine.pause_reason)}
+      {#if cabine.paused}
         <div class="bg-amber-50 border border-amber-200 rounded-2xl p-5">
           <p class="text-xs font-bold text-amber-700 uppercase tracking-wide mb-2">En pause</p>
-          <p class="text-sm text-amber-700">{cabine.pauseReason ?? cabine.pause_reason}</p>
-          <p class="text-xs text-amber-500 mt-2">Depuis le {formaterDate(cabine.pausedAt ?? cabine.paused_at)}</p>
+          <p class="text-sm text-amber-700">{cabine.pauseReason ?? 'Aucune raison indiquée'}</p>
         </div>
       {/if}
 
@@ -550,12 +532,6 @@
             <span class="text-slate-500">Dernière activité</span>
             <span class="font-semibold text-slate-800">{formaterDate(cabine.lastActivity ?? cabine.last_activity)}</span>
           </div>
-          {#if cabine.reactivatedAt ?? cabine.reactivated_at}
-            <div class="flex justify-between">
-              <span class="text-slate-500">Réactivée le</span>
-              <span class="font-semibold text-slate-800">{formaterDate(cabine.reactivatedAt ?? cabine.reactivated_at)}</span>
-            </div>
-          {/if}
         </div>
       </div>
 
@@ -859,12 +835,8 @@
             <input id="edit-city" type="text" bind:value={form.city} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
           </div>
           <div>
-            <label for="edit-type" class="block text-xs font-semibold text-slate-600 mb-1.5">Type</label>
-            <select id="edit-type" bind:value={form.type} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
-              <option value="basic">Basic</option>
-              <option value="standard">Standard</option>
-              <option value="premium">Premium</option>
-            </select>
+            <label for="edit-location" class="block text-xs font-semibold text-slate-600 mb-1.5">Localisation</label>
+            <input id="edit-location" type="text" bind:value={form.location} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
           </div>
         </div>
         <div class="grid grid-cols-2 gap-4">
@@ -880,11 +852,12 @@
         <div class="grid grid-cols-2 gap-4">
           <div>
             <label for="edit-maxorders" class="block text-xs font-semibold text-slate-600 mb-1.5">Max commandes/jour</label>
-            <input id="edit-maxorders" type="number" bind:value={form.maxDailyOrders} min="1" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
+            <input id="edit-maxorders" type="number" bind:value={form.maxDailyOrders} min="1" max="500" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
           </div>
           <div>
-            <label for="edit-maxamount" class="block text-xs font-semibold text-slate-600 mb-1.5">Montant max (XAF)</label>
-            <input id="edit-maxamount" type="number" bind:value={form.maxOrderAmount} min="0" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
+            <p class="block text-xs font-semibold text-slate-600 mb-1.5">Type</p>
+            <p class="px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-100 text-sm text-slate-600">{cabine?.type ? $t(`admin.cabins.type.${cabine.type}`) : '—'}</p>
+            <p class="text-[11px] text-slate-400 mt-1">Non modifiable après la création.</p>
           </div>
         </div>
         <div class="flex gap-3 pt-2">

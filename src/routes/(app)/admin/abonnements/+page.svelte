@@ -1,18 +1,13 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
+  import { page } from '$app/stores'
+  import { goto } from '$app/navigation'
   import api from '$lib/api'
   import { toast } from '$lib/stores/toast.svelte'
   import Badge from '$lib/components/ui/Badge.svelte'
   import { t, translate } from '$lib/stores/locale'
 
-  type Onglet = 'plans' | 'abonnements' | 'factures' | 'demandes'
-
-  const statusLabels: Record<string, string> = {
-    active: 'subscription.status.active',
-    expired: 'subscription.status.expired',
-    suspended: 'subscription.status.suspended',
-    pending: 'subscription.status.pending',
-  }
+  type Onglet = 'abonnements' | 'factures' | 'demandes'
 
   const planLabels: Record<string, string> = {
     basic: 'plan.basic',
@@ -20,23 +15,35 @@
     premium: 'plan.premium',
   }
 
-  const paymentMethodLabels: Record<string, string> = {
-    cash: 'form.method.cash',
-    mtn_money: 'form.method.mtn_money',
-    orange_money: 'form.method.orange_money',
-    virement: 'form.method.bank_transfer',
+  const statutsDocument: Record<string, { label: string; classe: string }> = {
+    pending:    { label: 'En attente', classe: 'bg-amber-100 text-amber-700 border-amber-200' },
+    processing: { label: 'En cours',   classe: 'bg-blue-100 text-blue-700 border-blue-200' },
+    approved:   { label: 'Approuvée',  classe: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+    rejected:   { label: 'Rejetée',    classe: 'bg-red-100 text-red-700 border-red-200' },
+    cancelled:  { label: 'Annulée',    classe: 'bg-slate-100 text-slate-600 border-slate-200' },
+    paid:       { label: 'Payée',      classe: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+    overdue:    { label: 'En retard',  classe: 'bg-red-100 text-red-700 border-red-200' },
   }
-  let onglet = $state<Onglet>('plans')
 
-  // Plans d'abonnement
-  type PlanConfig = { name: string; price: number; maxOrders: number }
-  let plans = $state<Record<string, PlanConfig>>({
-    basic:    { name: 'Basic',    price: 5000,  maxOrders: 100 },
-    standard: { name: 'Standard', price: 10000, maxOrders: 300 },
-    premium:  { name: 'Premium',  price: 20000, maxOrders: 999 },
-  })
-  let chargementPlans = $state(false)
-  let sauvegardePlans = $state(false)
+  const urgences: Record<string, string> = {
+    low: 'Faible',
+    normal: 'Normale',
+    high: 'Élevée',
+    critical: 'Critique',
+  }
+
+  function libellePlan(plan: string | null | undefined) {
+    if (!plan) return '—'
+    return planLabels[plan] ? translate(planLabels[plan]) : plan
+  }
+
+  let onglet = $state<Onglet>('abonnements')
+
+  const cabineFiltre = $derived($page.url.searchParams.get('cabin') ?? '')
+  let cabineFiltreInfo = $state<any>(null)
+
+  let cabines = $state<any[]>([])
+  const nomsCabines = $derived(Object.fromEntries(cabines.map((c) => [c.id, c.name])))
 
   // Abonnements
   let abonnements = $state<any[]>([])
@@ -47,10 +54,12 @@
 
   // Factures
   let factures = $state<any[]>([])
+  let metaFact = $state<any>(null)
   let pageFact = $state(1)
 
   // Demandes upgrade
   let demandes = $state<any[]>([])
+  let metaDem = $state<any>(null)
   let pageDem = $state(1)
   let filtreStatutDem = $state('')
 
@@ -65,7 +74,7 @@
   let afficherModalDemande = $state(false)
 
   // Formulaires
-  let formRenouveler = $state({ subscriptionType: 'basic', amountPaid: '', paymentMethod: 'cash', months: 1 })
+  let formRenouveler = $state({ cabinId: '', subscriptionType: 'basic', amountPaid: '', paymentMethod: 'cash', months: 1 })
   let formFacture = $state({ cabinId: '', subscriptionType: 'basic', amount: '', billingPeriodStart: '', billingPeriodEnd: '', dueDate: '' })
   let notesAdmin = $state('')
   let raisonRejet = $state('')
@@ -87,40 +96,42 @@
     return diff
   }
 
-  async function chargerPlans() {
-    chargementPlans = true
-    try {
-      const res = await api.get('/admin/settings/subscription_plans')
-      const setting = res.data?.data
-      if (setting?.value) {
-        const parsed = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value
-        plans = { ...plans, ...parsed }
-      }
-    } catch {
-      // Pas de config encore, valeurs par défaut utilisées
-    } finally { chargementPlans = false }
+  function messageErreur(e: any, defaut: string) {
+    const erreurs = e.response?.data?.errors
+    if (Array.isArray(erreurs) && erreurs.length) return erreurs.map((x: any) => x.message).join(' • ')
+    return e.response?.data?.message ?? defaut
   }
 
-  async function sauvegarderPlans() {
-    sauvegardePlans = true
+  async function chargerCabines() {
     try {
-      await api.put('/admin/settings/subscription_plans', { value: JSON.stringify(plans) })
-      toast.succes('Plans mis à jour')
-    } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de sauvegarder')
-    } finally { sauvegardePlans = false }
+      const res = await api.get('/cabins', { params: { page: 1, perPage: 200 } })
+      cabines = res.data?.data ?? []
+    } catch { cabines = [] }
+  }
+
+  async function chargerCabineFiltre() {
+    if (!cabineFiltre) { cabineFiltreInfo = null; return }
+    try {
+      const res = await api.get(`/cabins/${cabineFiltre}`)
+      cabineFiltreInfo = res.data?.data ?? null
+    } catch { cabineFiltreInfo = null }
   }
 
   async function chargerAbonnements() {
     chargement = true
     try {
+      if (cabineFiltre) {
+        await chargerCabineFiltre()
+        abonnements = cabineFiltreInfo ? [cabineFiltreInfo] : []
+        metaAbo = null
+        return
+      }
       const params: any = { page: pageAbo, per_page: 20 }
       if (filtreStatutAbo) params.status = filtreStatutAbo
       if (filtreExpirant) params.expiring_soon = 'true'
       const res = await api.get('/admin/subscriptions', { params })
-      const d = res.data?.data
-      abonnements = d?.data ?? d ?? []
-      metaAbo = d?.meta ?? null
+      abonnements = res.data?.data ?? []
+      metaAbo = res.data?.meta ?? null
     } catch { toast.erreur(translate('toast.error'), translate('errors.load_subscriptions')) }
     finally { chargement = false }
   }
@@ -128,10 +139,11 @@
   async function chargerFactures() {
     chargement = true
     try {
-      const res = await api.get('/admin/subscriptions/invoices', { params: { page: pageFact, per_page: 20 } })
-      const d = res.data?.data
-      factures = d?.data ?? d ?? []
-      // metaFact non affiché (pas de pagination factures)
+      const params: any = { page: pageFact, per_page: 20 }
+      if (cabineFiltre) params.cabin_id = cabineFiltre
+      const res = await api.get('/admin/subscriptions/invoices', { params })
+      factures = res.data?.data ?? []
+      metaFact = res.data?.meta ?? null
     } catch { toast.erreur(translate('toast.error'), translate('errors.load_invoices')) }
     finally { chargement = false }
   }
@@ -142,29 +154,38 @@
       const params: any = { page: pageDem, per_page: 20 }
       if (filtreStatutDem) params.status = filtreStatutDem
       const res = await api.get('/admin/subscriptions/upgrade-requests', { params })
-      const d = res.data?.data
-      demandes = d?.data ?? d ?? []
-      // metaDem non affiché (pas de pagination demandes)
+      demandes = res.data?.data ?? []
+      metaDem = res.data?.meta ?? null
     } catch { toast.erreur(translate('toast.error'), translate('errors.load_requests')) }
     finally { chargement = false }
   }
 
+  function ouvrirRenouvellement(cabine: any) {
+    cabineSelectionnee = cabine
+    formRenouveler = { cabinId: cabine?.id ?? '', subscriptionType: cabine?.type ?? 'basic', amountPaid: '', paymentMethod: 'cash', months: 1 }
+    afficherModalRenouveler = true
+  }
+
   async function renouveler() {
-    if (!cabineSelectionnee) return
+    const cabinId = cabineSelectionnee?.id ?? formRenouveler.cabinId
+    if (!cabinId) {
+      toast.erreur(translate('toast.error'), 'Sélectionnez une cabine')
+      return
+    }
     actionEnCours = 'renouveler'
     try {
-      await api.post(`/admin/subscriptions/renew/${cabineSelectionnee.id}`, {
+      const res = await api.post(`/admin/subscriptions/renew/${cabinId}`, {
         subscriptionType: formRenouveler.subscriptionType,
         amountPaid: Number(formRenouveler.amountPaid),
         paymentMethod: formRenouveler.paymentMethod,
         months: Number(formRenouveler.months),
       })
-      toast.succes(translate('success.subscription_renewed'))
+      toast.succes(translate('success.subscription_renewed'), res.data?.data?.message ?? res.data?.message)
       afficherModalRenouveler = false
       cabineSelectionnee = null
       await chargerAbonnements()
     } catch (e: any) {
-      toast.erreur(translate('toast.error'), e.response?.data?.message ?? translate('errors.renew_subscription'))
+      toast.erreur(translate('toast.error'), messageErreur(e, translate('errors.renew_subscription')))
     } finally { actionEnCours = '' }
   }
 
@@ -180,20 +201,20 @@
       formFacture = { cabinId: '', subscriptionType: 'basic', amount: '', billingPeriodStart: '', billingPeriodEnd: '', dueDate: '' }
       await chargerFactures()
     } catch (e: any) {
-      toast.erreur(translate('toast.error'), e.response?.data?.message ?? translate('errors.create_invoice'))
+      toast.erreur(translate('toast.error'), messageErreur(e, translate('errors.create_invoice')))
     } finally { actionEnCours = '' }
   }
 
   async function approuverDemande(id: string) {
     actionEnCours = id
     try {
-      await api.post(`/admin/subscriptions/upgrade-requests/${id}/approve`, { adminNotes: notesAdmin })
+      await api.post(`/admin/subscriptions/upgrade-requests/${id}/approve`, notesAdmin.trim() ? { adminNotes: notesAdmin.trim() } : {})
       toast.succes(translate('success.request_approved'))
       afficherModalDemande = false
       notesAdmin = ''
       await chargerDemandes()
     } catch (e: any) {
-      toast.erreur(translate('toast.error'), e.response?.data?.message ?? translate('errors.approve_request'))
+      toast.erreur(translate('toast.error'), messageErreur(e, translate('errors.approve_request')))
     } finally { actionEnCours = '' }
   }
 
@@ -206,18 +227,25 @@
       raisonRejet = ''
       await chargerDemandes()
     } catch (e: any) {
-      toast.erreur(translate('toast.error'), e.response?.data?.message ?? translate('errors.reject_request'))
+      toast.erreur(translate('toast.error'), messageErreur(e, translate('errors.reject_request')))
     } finally { actionEnCours = '' }
   }
 
+  function retirerFiltreCabine() {
+    goto('/admin/abonnements', { replaceState: true, keepFocus: true })
+  }
+
   $effect(() => {
-    if (onglet === 'plans') chargerPlans()
-    else if (onglet === 'abonnements') chargerAbonnements()
-    else if (onglet === 'factures') chargerFactures()
-    else chargerDemandes()
+    const o = onglet
+    cabineFiltre
+    untrack(() => {
+      if (o === 'abonnements') chargerAbonnements()
+      else if (o === 'factures') chargerFactures()
+      else chargerDemandes()
+    })
   })
 
-  onMount(chargerPlans)
+  onMount(chargerCabines)
 </script>
 
 <svelte:head><title>{$t('page.subscriptions')} — TransfertCM Admin</title></svelte:head>
@@ -229,12 +257,12 @@
   </div>
   <div class="flex gap-2">
     {#if onglet === 'abonnements'}
-      <button type="button" onclick={() => { cabineSelectionnee = null; afficherModalRenouveler = true }} class="btn-secondary">
+      <button type="button" onclick={() => ouvrirRenouvellement(cabineFiltreInfo)} class="btn-secondary">
         <span class="material-symbols-outlined icon-filled" style="font-size:16px">autorenew</span>
         {$t('button.renew')}
       </button>
     {:else if onglet === 'factures'}
-      <button type="button" onclick={() => afficherModalFacture = true} class="btn-primary">
+      <button type="button" onclick={() => { formFacture.cabinId = cabineFiltre; afficherModalFacture = true }} class="btn-primary">
         <span class="material-symbols-outlined icon-filled" style="font-size:16px">add</span>
         {$t('button.new_invoice')}
       </button>
@@ -242,10 +270,19 @@
   </div>
 </div>
 
+{#if cabineFiltre}
+  <div class="mb-4 flex items-center justify-between gap-3 flex-wrap p-3 rounded-xl bg-orange-50 border border-orange-100">
+    <p class="text-sm text-orange-700">
+      Cabine : <span class="font-bold">{cabineFiltreInfo?.name ?? nomsCabines[cabineFiltre] ?? '…'}</span>
+      <span class="text-xs text-orange-600">(abonnement et factures de cette cabine uniquement)</span>
+    </p>
+    <button type="button" onclick={retirerFiltreCabine} class="text-xs font-semibold text-orange-600 hover:text-orange-700">Afficher toutes les cabines</button>
+  </div>
+{/if}
+
 <!-- Onglets -->
 <div class="flex gap-1 bg-slate-100 rounded-xl p-1 mb-5 w-fit">
   {#each [
-    ['plans', 'workspace_premium', 'Plans'],
     ['abonnements', 'card_membership', 'page.subscriptions'],
     ['factures', 'receipt', 'page.invoices'],
     ['demandes', 'upgrade', 'page.upgrade_requests']
@@ -254,110 +291,28 @@
       class="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold transition-all
         {onglet === val ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}">
       <span class="material-symbols-outlined icon-filled" style="font-size:16px">{icone}</span>
-      {val === 'plans' ? label : $t(label)}
+      {$t(label)}
     </button>
   {/each}
 </div>
 
-<!-- ── Onglet Plans ── -->
-{#if onglet === 'plans'}
-  <div class="mb-5 flex items-center justify-between">
-    <p class="text-sm text-slate-500">Configurez les noms et tarifs des plans d'abonnement proposés aux cabines.</p>
-    <button onclick={sauvegarderPlans} disabled={sauvegardePlans}
-      class="btn-primary">
-      {#if sauvegardePlans}
-        <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-      {:else}
-        <span class="material-symbols-outlined icon-filled" style="font-size:16px">save</span>
-        Enregistrer
-      {/if}
-    </button>
-  </div>
-
-  {#if chargementPlans}
-    <div class="grid grid-cols-1 md:grid-cols-3 stagger gap-4">
-      {#each Array(3) as _}<div class="skeleton h-52 rounded-2xl"></div>{/each}
-    </div>
-  {:else}
-    <div class="grid grid-cols-1 md:grid-cols-3 stagger gap-4">
-      {#each [
-        { key: 'basic',    couleur: '#64748b', label: 'Basic',    icone: 'star' },
-        { key: 'standard', couleur: '#007A5E', label: 'Standard', icone: 'star_half' },
-        { key: 'premium',  couleur: '#8b5cf6', label: 'Premium',  icone: 'workspace_premium' },
-      ] as plan}
-        {@const p = plans[plan.key]}
-        <div class="bg-white rounded-2xl border border-slate-100 card-shadow p-6 flex flex-col gap-5">
-          <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-xl flex items-center justify-center" style="background:{plan.couleur}18">
-              <span class="material-symbols-outlined icon-filled" style="font-size:20px;color:{plan.couleur}">{plan.icone}</span>
-            </div>
-            <div class="flex-1">
-              <input
-                type="text"
-                bind:value={p.name}
-                class="w-full text-base font-bold text-slate-900 bg-transparent border-b border-dashed border-slate-200 focus:border-orange-400 focus:outline-none py-0.5 transition-colors"
-                placeholder="Nom du plan"
-              />
-            </div>
-          </div>
-
-          <div class="space-y-4">
-            <div>
-              <label for="{plan.key}-price" class="block text-xs font-semibold text-slate-500 mb-1.5">Prix mensuel (XAF)</label>
-              <div class="relative">
-                <input
-                  id="{plan.key}-price"
-                  type="number"
-                  bind:value={p.price}
-                  min="0"
-                  class="w-full px-3 py-2.5 pr-12 rounded-xl border border-slate-200 text-sm font-semibold text-slate-900 focus:outline-none focus:border-orange-400 transition-colors"
-                  placeholder="5000"
-                />
-                <span class="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-medium">XAF</span>
-              </div>
-            </div>
-
-            <div>
-              <label for="{plan.key}-maxorders" class="block text-xs font-semibold text-slate-500 mb-1.5">Commandes max / mois</label>
-              <input
-                id="{plan.key}-maxorders"
-                type="number"
-                bind:value={p.maxOrders}
-                min="1"
-                class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-semibold text-slate-900 focus:outline-none focus:border-orange-400 transition-colors"
-                placeholder="100"
-              />
-            </div>
-          </div>
-
-          <div class="mt-auto pt-4 border-t border-slate-50">
-            <p class="text-xs text-slate-400">
-              <span class="font-semibold text-slate-600">{p.price.toLocaleString('fr-CM')} XAF</span> / mois
-              · max <span class="font-semibold text-slate-600">{p.maxOrders === 999 ? '∞' : p.maxOrders}</span> commandes
-            </p>
-          </div>
-        </div>
-      {/each}
-    </div>
-  {/if}
-
-<!-- ── Onglet Abonnements ── -->
-{:else if onglet === 'abonnements'}
+{#if onglet === 'abonnements'}
   <!-- Filtres -->
+  {#if !cabineFiltre}
   <div class="bg-white rounded-2xl border border-slate-100 card-shadow p-4 mb-5">
     <div class="flex flex-wrap gap-3 items-center">
-      <select bind:value={filtreStatutAbo} onchange={chargerAbonnements} class="px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
+      <select bind:value={filtreStatutAbo} onchange={() => { pageAbo = 1; chargerAbonnements() }} class="px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
         <option value="">{$t('filters.all_statuses')}</option>
         <option value="active">{$t('filters.active')}</option>
-        <option value="expired">{$t('filters.expired')}</option>
-        <option value="suspended">{$t('filters.suspended')}</option>
+        <option value="inactive">Inactifs</option>
       </select>
       <label class="flex items-center gap-2 cursor-pointer">
-        <input type="checkbox" bind:checked={filtreExpirant} onchange={chargerAbonnements} class="w-4 h-4 accent-orange-500 rounded" />
+        <input type="checkbox" bind:checked={filtreExpirant} onchange={() => { pageAbo = 1; chargerAbonnements() }} class="w-4 h-4 accent-orange-500 rounded" />
         <span class="text-sm font-medium text-slate-700">{$t('filters.expiring_soon')}</span>
       </label>
     </div>
   </div>
+  {/if}
 
   <div class="bg-white rounded-2xl border border-slate-100 card-shadow overflow-hidden">
     {#if chargement}
@@ -371,37 +326,31 @@
       </div>
     {:else}
       <div class="hidden lg:grid grid-cols-12 gap-3 px-5 py-3 bg-slate-50 border-b border-slate-100 text-xs font-semibold text-slate-400 uppercase tracking-wide">
-        <div class="col-span-3">{$t('table.cabin')}</div>
+        <div class="col-span-4">{$t('table.cabin')}</div>
         <div class="col-span-2">{$t('table.status')}</div>
-        <div class="col-span-3">{$t('table.due_date')}</div>
-        <div class="col-span-2">{$t('subscription.auto_renew')}</div>
+        <div class="col-span-4">{$t('table.due_date')}</div>
         <div class="col-span-2">{$t('table.actions')}</div>
       </div>
       <div class="divide-y divide-slate-50">
         {#each abonnements as abo}
-          {@const jours = joursRestants(abo.subscription_expiry)}
+          {@const jours = joursRestants(abo.subscriptionExpiry)}
           <div class="flex flex-col gap-2 lg:grid lg:grid-cols-12 lg:gap-3 lg:items-center px-5 py-3.5 hover:bg-slate-50 transition-all">
-            <div class="lg:col-span-3">
-              <p class="text-sm font-semibold text-slate-800">{abo.name ?? '—'}</p>
+            <div class="lg:col-span-4">
+              <a href="/admin/cabines/{abo.id}" class="text-sm font-semibold text-slate-800 hover:text-orange-600">{abo.name ?? '—'}</a>
             </div>
             <div class="lg:col-span-2">
-              <Badge statut={abo.subscription_status ?? 'inactive'} />
+              <Badge statut={abo.subscriptionStatus ?? 'inactive'} />
             </div>
-            <div class="lg:col-span-3">
-              <p class="text-sm text-slate-700">{formaterDate(abo.subscription_expiry)}</p>
+            <div class="lg:col-span-4">
+              <p class="text-sm text-slate-700">{formaterDate(abo.subscriptionExpiry)}</p>
               {#if jours !== null}
                 <p class="text-xs {jours <= 0 ? 'text-red-500' : jours <= 7 ? 'text-amber-500' : 'text-slate-400'} font-medium">
                   {jours <= 0 ? $t('subscription.expired') : `${$t('subscription.in')} ${jours} ${jours > 1 ? $t('subscription.days') : $t('subscription.day')}`}
                 </p>
               {/if}
             </div>
-            <div class="lg:col-span-2">
-              <span class="text-sm font-semibold {abo.auto_renew ? 'text-emerald-600' : 'text-slate-400'}">
-                {$t(abo.auto_renew ? 'subscription.auto_renew.enabled' : 'subscription.auto_renew.disabled')}
-              </span>
-            </div>
             <div class="lg:col-span-2 flex gap-2">
-              <button onclick={() => { cabineSelectionnee = abo; afficherModalRenouveler = true }}
+              <button onclick={() => ouvrirRenouvellement(abo)}
                 class="text-xs px-2.5 py-1.5 rounded-lg bg-orange-50 text-orange-600 font-semibold hover:bg-orange-100 flex items-center gap-1">
                 <span class="material-symbols-outlined icon-filled" style="font-size:13px">autorenew</span>
                 {$t('button.renew')}
@@ -444,30 +393,51 @@
       </div>
       <div class="divide-y divide-slate-50">
         {#each factures as fact}
+          {@const st = statutsDocument[fact.status] ?? { label: fact.status ?? '—', classe: 'bg-slate-100 text-slate-600 border-slate-200' }}
           <div class="flex flex-col gap-2 lg:grid lg:grid-cols-12 lg:gap-3 lg:items-center px-5 py-3.5 hover:bg-slate-50 transition-all">
             <div class="lg:col-span-2">
-              <p class="text-xs font-mono font-semibold text-orange-600">{fact.invoice_number ?? '—'}</p>
+              <p class="text-xs font-mono font-semibold text-orange-600">{fact.invoiceNumber ?? '—'}</p>
             </div>
             <div class="lg:col-span-3">
-              <p class="text-sm text-slate-700">{fact.cabin_id ?? '—'}</p>
+              <p class="text-sm text-slate-700">{nomsCabines[fact.cabinId] ?? '—'}</p>
+              <p class="text-xs text-slate-400">{libellePlan(fact.subscriptionType)} · {formaterDate(fact.billingPeriodStart)} → {formaterDate(fact.billingPeriodEnd)}</p>
             </div>
             <div class="lg:col-span-2">
               <p class="text-sm font-bold text-slate-900">{formaterMontant(fact.amount)}</p>
             </div>
             <div class="lg:col-span-2">
-              <Badge statut={fact.status ?? 'pending'} />
+              <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border {st.classe}">{st.label}</span>
             </div>
             <div class="lg:col-span-3">
-              <p class="text-sm text-slate-600">{formaterDate(fact.due_date)}</p>
+              <p class="text-sm text-slate-600">{formaterDate(fact.dueDate)}</p>
             </div>
           </div>
         {/each}
       </div>
+      {#if metaFact && metaFact.lastPage > 1}
+        <div class="px-5 py-4 border-t border-slate-100 flex items-center justify-between">
+          <p class="text-sm text-slate-500">{$t('pagination.page')} {metaFact.currentPage} {$t('pagination.of')} {metaFact.lastPage}</p>
+          <div class="flex gap-2">
+            <button onclick={() => { pageFact--; chargerFactures() }} disabled={pageFact <= 1} class="px-3 py-1.5 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed">{$t('button.previous')}</button>
+            <button onclick={() => { pageFact++; chargerFactures() }} disabled={pageFact >= metaFact.lastPage} class="px-3 py-1.5 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed">{$t('button.next')}</button>
+          </div>
+        </div>
+      {/if}
     {/if}
   </div>
 
 <!-- ── Onglet Demandes upgrade ── -->
 {:else}
+  <div class="bg-white rounded-2xl border border-slate-100 card-shadow p-4 mb-5">
+    <select bind:value={filtreStatutDem} onchange={() => { pageDem = 1; chargerDemandes() }} class="px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
+      <option value="">{$t('filters.all_statuses')}</option>
+      <option value="pending">En attente</option>
+      <option value="processing">En cours</option>
+      <option value="approved">Approuvées</option>
+      <option value="rejected">Rejetées</option>
+      <option value="cancelled">Annulées</option>
+    </select>
+  </div>
   <div class="bg-white rounded-2xl border border-slate-100 card-shadow overflow-hidden">
     {#if chargement}
       <div class="p-5 space-y-2">{#each Array(6) as _}<div class="skeleton h-14 rounded-xl"></div>{/each}</div>
@@ -481,17 +451,19 @@
     {:else}
       <div class="divide-y divide-slate-50">
         {#each demandes as dem}
+          {@const st = statutsDocument[dem.status] ?? { label: dem.status ?? '—', classe: 'bg-slate-100 text-slate-600 border-slate-200' }}
           <div class="flex flex-col gap-2 lg:flex-row lg:items-center px-5 py-4 hover:bg-slate-50 transition-all">
             <div class="flex-1 min-w-0">
-              <p class="text-sm font-semibold text-slate-800">{dem.cabin_name ?? '—'}</p>
+              <p class="text-sm font-semibold text-slate-800">{dem.cabinName ?? nomsCabines[dem.cabinId] ?? '—'}</p>
               <p class="text-xs text-slate-500 mt-0.5">
-                {dem.current_plan ?? '—'} → <span class="font-semibold text-orange-600">{dem.requested_plan ?? '—'}</span>
+                {libellePlan(dem.currentPlan)} → <span class="font-semibold text-orange-600">{libellePlan(dem.requestedPlan)}</span>
+                {#if dem.urgencyLevel}· Urgence : {urgences[dem.urgencyLevel] ?? dem.urgencyLevel}{/if}
               </p>
-              <p class="text-xs text-slate-400 mt-0.5">{formaterDate(dem.created_at)}</p>
+              <p class="text-xs text-slate-400 mt-0.5">{formaterDate(dem.createdAt)}</p>
             </div>
             <div class="flex items-center gap-2">
-              <Badge statut={dem.status ?? 'pending'} />
-              {#if dem.status === 'pending'}
+              <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border {st.classe}">{st.label}</span>
+              {#if dem.status === 'pending' || dem.status === 'processing'}
                 <button onclick={() => { demandeSelectionnee = dem; afficherModalDemande = true }}
                   class="text-xs px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-600 font-semibold hover:bg-slate-200">
                   {$t('button.process')}
@@ -501,6 +473,15 @@
           </div>
         {/each}
       </div>
+      {#if metaDem && metaDem.lastPage > 1}
+        <div class="px-5 py-4 border-t border-slate-100 flex items-center justify-between">
+          <p class="text-sm text-slate-500">{$t('pagination.page')} {metaDem.currentPage} {$t('pagination.of')} {metaDem.lastPage}</p>
+          <div class="flex gap-2">
+            <button onclick={() => { pageDem--; chargerDemandes() }} disabled={pageDem <= 1} class="px-3 py-1.5 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed">{$t('button.previous')}</button>
+            <button onclick={() => { pageDem++; chargerDemandes() }} disabled={pageDem >= metaDem.lastPage} class="px-3 py-1.5 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed">{$t('button.next')}</button>
+          </div>
+        </div>
+      {/if}
     {/if}
   </div>
 {/if}
@@ -524,7 +505,10 @@
         {:else}
           <div>
             <label for="ren-cabin" class="block text-xs font-semibold text-slate-600 mb-1.5">{$t('form.cabin_id')}</label>
-            <input id="ren-cabin" type="text" bind:value={formRenouveler.subscriptionType} placeholder={$t('form.cabin_id_placeholder')} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
+            <select id="ren-cabin" bind:value={formRenouveler.cabinId} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
+              <option value="">Sélectionner une cabine</option>
+              {#each cabines as c}<option value={c.id}>{c.name}{c.city ? ` — ${c.city}` : ''}</option>{/each}
+            </select>
           </div>
         {/if}
         <div class="grid grid-cols-2 gap-4">
@@ -538,13 +522,13 @@
           </div>
           <div>
             <label for="ren-months" class="block text-xs font-semibold text-slate-600 mb-1.5">{$t('form.duration_months')}</label>
-            <input id="ren-months" type="number" bind:value={formRenouveler.months} min="1" max="12" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
+            <input id="ren-months" type="number" bind:value={formRenouveler.months} min="1" max="24" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
           </div>
         </div>
         <div class="grid grid-cols-2 gap-4">
           <div>
             <label for="ren-amount" class="block text-xs font-semibold text-slate-600 mb-1.5">{$t('form.amount_paid')}</label>
-            <input id="ren-amount" type="number" bind:value={formRenouveler.amountPaid} placeholder="5000" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
+            <input id="ren-amount" type="number" bind:value={formRenouveler.amountPaid} min="1" placeholder="5000" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
           </div>
           <div>
             <label for="ren-method" class="block text-xs font-semibold text-slate-600 mb-1.5">{$t('form.payment_method')}</label>
@@ -558,7 +542,7 @@
         </div>
         <div class="flex gap-3">
           <button onclick={() => afficherModalRenouveler = false} class="btn-secondary flex-1">{$t('button.cancel')}</button>
-          <button onclick={renouveler} disabled={actionEnCours === 'renouveler'} class="btn-primary flex-1 justify-center">
+          <button onclick={renouveler} disabled={actionEnCours === 'renouveler' || !(cabineSelectionnee?.id || formRenouveler.cabinId) || !(Number(formRenouveler.amountPaid) > 0)} class="btn-primary flex-1 justify-center">
             {#if actionEnCours === 'renouveler'}<span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>{:else}
               <span class="material-symbols-outlined icon-filled" style="font-size:16px">autorenew</span>{$t('button.renew')}
             {/if}
@@ -582,7 +566,10 @@
       <div class="p-6 space-y-4">
         <div>
           <label for="facture-cabin" class="block text-xs font-semibold text-slate-600 mb-1.5">{$t('form.cabin_id')}</label>
-          <input id="facture-cabin" type="text" bind:value={formFacture.cabinId} placeholder={$t('form.cabin_id_placeholder')} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
+          <select id="facture-cabin" bind:value={formFacture.cabinId} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
+            <option value="">Sélectionner une cabine</option>
+            {#each cabines as c}<option value={c.id}>{c.name}{c.city ? ` — ${c.city}` : ''}</option>{/each}
+          </select>
         </div>
         <div>
           <label for="facture-type" class="block text-xs font-semibold text-slate-600 mb-1.5">{$t('form.plan')}</label>
@@ -635,14 +622,15 @@
       </div>
       <div class="p-6 space-y-4">
         <div class="p-3 rounded-xl bg-slate-50 border border-slate-100">
-          <p class="text-sm font-semibold text-slate-800">{demandeSelectionnee.cabin_name}</p>
+          <p class="text-sm font-semibold text-slate-800">{demandeSelectionnee.cabinName ?? nomsCabines[demandeSelectionnee.cabinId] ?? '—'}</p>
           <p class="text-xs text-slate-500 mt-1">
-            {demandeSelectionnee.current_plan} → <span class="font-bold text-orange-600">{demandeSelectionnee.requested_plan}</span>
+            {libellePlan(demandeSelectionnee.currentPlan)} → <span class="font-bold text-orange-600">{libellePlan(demandeSelectionnee.requestedPlan)}</span>
           </p>
-          {#if demandeSelectionnee.reason}
-            <p class="text-xs text-slate-600 mt-2 italic">"{demandeSelectionnee.reason}"</p>
+          {#if demandeSelectionnee.justification}
+            <p class="text-xs text-slate-600 mt-2 italic">"{demandeSelectionnee.justification}"</p>
           {/if}
         </div>
+        <p class="text-xs text-slate-500">L'approbation enregistre seulement la décision : le type de la cabine n'est pas modifié automatiquement.</p>
         <div>
           <label for="notes-admin" class="block text-xs font-semibold text-slate-600 mb-1.5">{$t('form.notes_admin')}</label>
           <textarea id="notes-admin" bind:value={notesAdmin} rows="2" placeholder={$t('form.notes_optional')} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm resize-none"></textarea>

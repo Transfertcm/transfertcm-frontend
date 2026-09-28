@@ -17,12 +17,21 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// Désencapsuler la double-couche { data: { data: X, meta: Y } } → { data: X, meta: Y }
+// L'API renvoie tantôt { data: { data: X, meta } }, tantôt { data: X, metadata } :
+// les deux sont ramenées à { data: X, meta }.
+function normaliser(body: any) {
+  if (!body || typeof body !== 'object' || Array.isArray(body) || !('data' in body)) return body
+  const { data, metadata, meta, ...reste } = body
+  const doubleEnveloppe =
+    data && typeof data === 'object' && !Array.isArray(data) && 'data' in data &&
+    metadata === undefined && meta === undefined && Object.keys(reste).length === 0
+  if (doubleEnveloppe) return data
+  return { ...reste, data, meta: meta ?? metadata }
+}
+
 api.interceptors.response.use(
   (res) => {
-    if (res.data && typeof res.data === 'object' && 'data' in res.data) {
-      res.data = res.data.data
-    }
+    res.data = normaliser(res.data)
     return res
   },
   (err) => {

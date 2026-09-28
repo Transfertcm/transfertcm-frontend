@@ -1,10 +1,9 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
-  import api from '$lib/api'
+    import api from '$lib/api'
   import { auth } from '$lib/stores/auth.svelte'
   import { t } from '$lib/stores/locale'
   import StatCard from '$lib/components/ui/StatCard.svelte'
-  import Badge from '$lib/components/ui/Badge.svelte'
+  import Badge, { libelleStatut, libelleService } from '$lib/components/ui/Badge.svelte'
 
   let stats = $state<any>(null)
   let commandesRecentes = $state<any[]>([])
@@ -45,8 +44,6 @@
       chargement = false
     }
   }
-
-  onMount(chargerDonnees)
 
   $effect(() => {
     periode // réagir au changement
@@ -112,19 +109,19 @@
     />
     <StatCard
       titre="Chiffre d'affaires {labelPeriode}"
-      valeur={formaterMontant(ordres?.totals?.total_amount ?? 0)}
+      valeur={formaterMontant(ordres?.totals?.totalAmount ?? 0)}
       icone="payments"
       couleur="jaune"
     />
     <StatCard
       titre="Paiements reçus {labelPeriode}"
-      valeur={paiements?.total_paid ?? 0}
+      valeur={paiements?.totalPaid ?? 0}
       icone="check_circle"
       couleur="vert"
     />
     <StatCard
-      titre="Revenus (frais) {labelPeriode}"
-      valeur={formaterMontant(paiements?.total_revenue ?? 0)}
+      titre="Montant encaissé {labelPeriode}"
+      valeur={formaterMontant(paiements?.totalRevenue ?? 0)}
       icone="account_balance"
       couleur="violet"
     />
@@ -133,7 +130,7 @@
   <div class="grid grid-cols-2 lg:grid-cols-4 stagger gap-3 mb-6">
     {#each (ordres?.byStatus ?? []) as s}
       <StatCard
-        titre={s.status?.replace(/_/g, ' ') ?? '—'}
+        titre={libelleStatut(s.status, $t)}
         valeur={s.count ?? 0}
         icone="circle"
         couleur="bleu"
@@ -225,7 +222,7 @@
             </div>
             <!-- Service -->
             <div class="lg:col-span-2 pl-9 lg:pl-0">
-              <span class="text-xs text-slate-500 capitalize">{cmd.serviceType ?? '—'}</span>
+              <span class="text-xs text-slate-500">{libelleService(cmd.serviceType)}</span>
             </div>
             <!-- Statut -->
             <div class="lg:col-span-3 pl-9 lg:pl-0">
@@ -275,12 +272,12 @@
             <div class="flex-1 min-w-0">
               <p class="text-sm font-semibold text-slate-800 truncate">{cabine.name ?? '—'}</p>
               <p class="text-xs text-slate-400 mt-0.5">
-                {cabine.daily_orders_count ?? 0} commande{(cabine.daily_orders_count ?? 0) > 1 ? 's' : ''} aujourd'hui
+                {cabine.dailyOrdersCount ?? 0} commande{(cabine.dailyOrdersCount ?? 0) > 1 ? 's' : ''} aujourd'hui
               </p>
             </div>
             <div class="text-right shrink-0">
-              <p class="text-sm font-bold {(cabine.uv_balance ?? 0) < 1000 ? 'text-red-500' : 'text-emerald-600'}">
-                {Number(cabine.uv_balance ?? 0).toLocaleString('fr-CM')}
+              <p class="text-sm font-bold {(cabine.uvBalance ?? 0) < 1000 ? 'text-red-500' : 'text-emerald-600'}">
+                {Number(cabine.uvBalance ?? 0).toLocaleString('fr-CM')}
               </p>
               <p class="text-xs text-slate-400">XAF UV</p>
             </div>
@@ -323,7 +320,7 @@
             ></div>
           </div>
           <p class="text-xs text-slate-400 mt-1">
-            {$t('admin.dashboard.total')} : {formaterMontant(reseau.total_amount ?? 0)}
+            {$t('admin.dashboard.total')} : {formaterMontant(reseau.totalAmount ?? 0)}
           </p>
         </div>
       {/each}

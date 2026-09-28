@@ -7,6 +7,7 @@
   import { t } from '$lib/stores/locale'
   import api from '$lib/api'
   import LanguageSwitcher from '$lib/components/ui/LanguageSwitcher.svelte'
+  import { libelleStatut } from '$lib/components/ui/Badge.svelte'
 
   let { surToggleSidebar } = $props<{ surToggleSidebar: () => void }>()
 
@@ -17,6 +18,7 @@
   let rechercheQuery  = $state('')
   let rechercheResults = $state<any[]>([])
   let rechercheLoading = $state(false)
+  let rechercheErreur = $state(false)
   let afficherRecherche = $state(false)
   let rechercheTimer: ReturnType<typeof setTimeout> | null = null
   let filtreType = $state<'all' | 'order' | 'cabin' | 'complaint' | 'promo_agent'>('all')
@@ -46,6 +48,28 @@
     active: 'bg-emerald-100 text-emerald-700', suspended: 'bg-red-100 text-red-700',
     open: 'bg-orange-100 text-orange-700', resolved: 'bg-emerald-100 text-emerald-700',
   }
+  const TYPE_URL_LISTE: Record<string, string> = { complaint: '/admin/reclamations', promo_agent: '/admin/agents-promo' }
+  const CODES_SOUS_TITRE: Record<string, string> = {
+    basic: 'Basique', standard: 'Standard', premium: 'Premium',
+    in_verification: 'En vérification', resolved: 'Résolue',
+  }
+
+  function lienResultat(r: any) {
+    return TYPE_URL_LISTE[r.type] ?? r.url ?? '#'
+  }
+
+  function sousTitre(r: any) {
+    if (!r.subtitle) return TYPE_LABEL[r.type]
+    return String(r.subtitle)
+      .split(' · ')
+      .map((morceau: string) => {
+        const code = morceau.trim()
+        if (CODES_SOUS_TITRE[code]) return CODES_SOUS_TITRE[code]
+        if (/^[a-z]+(_[a-z]+)*$/.test(code) && code !== 'mtn' && code !== 'orange') return libelleStatut(code, $t)
+        return morceau
+      })
+      .join(' · ')
+  }
 
   function rechercheFiltered() {
     if (filtreType === 'all') return rechercheResults
@@ -65,17 +89,22 @@
       ['/admin/commandes',       'admin.nav.orders'],
       ['/admin/cabines',         'admin.nav.cabins'],
       ['/admin/abonnements',     'admin.nav.subscriptions'],
-      ['/admin/uv',              'admin.nav.uv'],
+      ['/admin/uv',              'UV'],
       ['/admin/reclamations',    'admin.nav.complaints'],
       ['/admin/agents-promo',    'admin.nav.promo_agents'],
       ['/admin/messagerie',      'admin.nav.messaging'],
+      ['/admin/support',         'Support'],
+      ['/admin/call-center',     'admin.nav.call_center'],
       ['/admin/notifications',   'admin.nav.notifications'],
-      ['/admin/fraude',          'admin.nav.fraud'],
+      ['/admin/taches',          'admin.nav.tasks'],
+      ['/admin/fraude',          'Fraude'],
       ['/admin/rapports',        'admin.nav.reports'],
       ['/admin/salaires',        'admin.nav.salaries'],
+      ['/admin/remunerations',   'Rémunérations'],
+      ['/admin/equipe',          'admin.nav.team'],
       ['/admin/parametres',      'admin.nav.settings'],
       ['/admin/profil',          'admin.nav.profile'],
-      ['/admin/packages',        'admin.nav.packages'],
+      ['/admin/packages',        'Forfaits'],
     ]
     for (const [prefix, cle] of carte) {
       if (chemin === prefix || chemin.startsWith(prefix + '/')) return cle
@@ -108,10 +137,12 @@
 
   async function chargerNotifications() {
     try {
-      const res = await api.get('/admin/notifications?per_page=8')
-      const data = res.data?.data
-      notifications = data?.data ?? []
-      nbNonLues = notifications.filter((n: any) => !n.isRead && !n.is_read).length
+      const [liste, compteur] = await Promise.all([
+        api.get('/admin/notifications', { params: { per_page: 8 } }),
+        api.get('/admin/notifications/count'),
+      ])
+      notifications = Array.isArray(liste.data?.data) ? liste.data.data : []
+      nbNonLues = Number(compteur.data?.data?.count ?? notifications.filter((n: any) => n.isNew).length)
     } catch {}
   }
 
@@ -124,7 +155,7 @@
   async function marquerToutLu() {
     try {
       await api.patch('/admin/notifications/read-all')
-      notifications = notifications.map(n => ({ ...n, isRead: true }))
+      notifications = notifications.map(n => ({ ...n, isNew: false }))
       nbNonLues = 0
     } catch {}
   }
@@ -146,15 +177,17 @@
     rechercheQuery = val
     afficherRecherche = rechercheQuery.length > 0
     filtreType = 'all'
+    rechercheErreur = false
     if (rechercheTimer) clearTimeout(rechercheTimer)
     if (rechercheQuery.trim().length < 2) { rechercheResults = []; return }
     rechercheTimer = setTimeout(async () => {
       rechercheLoading = true
       try {
         const res = await api.get('/admin/search', { params: { q: rechercheQuery, per_page: 30 } })
-        rechercheResults = res.data?.data ?? []
+        rechercheResults = Array.isArray(res.data?.data) ? res.data.data : []
       } catch {
         rechercheResults = []
+        rechercheErreur = true
       } finally {
         rechercheLoading = false
       }
@@ -219,6 +252,13 @@
               {/each}
             </div>
 
+          {:else if rechercheErreur}
+            <div class="py-10 text-center px-6">
+              <span class="material-symbols-outlined text-red-300" style="font-size:32px">error</span>
+              <p class="text-sm text-slate-500 mt-2">La recherche est momentanément indisponible.</p>
+              <p class="text-xs text-slate-400 mt-1">Utilisez les filtres des pages Commandes ou Cabines en attendant.</p>
+            </div>
+
           {:else if rechercheResults.length === 0}
             <div class="py-10 text-center">
               <span class="material-symbols-outlined text-slate-300" style="font-size:32px">search_off</span>
@@ -247,7 +287,7 @@
             <!-- Résultats -->
             <div class="max-h-80 overflow-y-auto divide-y divide-slate-50">
               {#each rechercheFiltered() as r}
-                <a href={r.url ?? '#'} onclick={fermerRecherche}
+                <a href={lienResultat(r)} onclick={fermerRecherche}
                   class="flex items-center gap-3 px-4 py-3 hover:bg-orange-50 transition-colors group">
                   <div class="w-8 h-8 rounded-lg {TYPE_BG[r.type]} flex items-center justify-center shrink-0">
                     <span class="material-symbols-outlined icon-filled {TYPE_TEXT[r.type]}" style="font-size:15px">
@@ -258,11 +298,11 @@
                     <p class="text-sm font-semibold text-slate-800 truncate group-hover:text-orange-600 transition-colors">
                       {r.title}
                     </p>
-                    <p class="text-xs text-slate-400 truncate">{r.subtitle ?? TYPE_LABEL[r.type]}</p>
+                    <p class="text-xs text-slate-400 truncate">{sousTitre(r)}</p>
                   </div>
                   {#if r.status}
                     <span class="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 {STATUS_COLORS[r.status] ?? 'bg-slate-100 text-slate-600'}">
-                      {r.status}
+                      {libelleStatut(r.status, $t)}
                     </span>
                   {/if}
                   <span class="material-symbols-outlined text-slate-300 group-hover:text-orange-400 shrink-0" style="font-size:16px">chevron_right</span>
@@ -494,7 +534,7 @@
               </div>
             {:else}
               {#each notifications as notif}
-                <div class="px-4 py-3 border-b border-slate-50 last:border-0 {!notif.isRead && !notif.is_read ? 'bg-orange-50/60' : ''}">
+                <div class="px-4 py-3 border-b border-slate-50 last:border-0 {notif.isNew ? 'bg-orange-50/60' : ''}">
                   <div class="flex items-start gap-2.5">
                     <div class="w-7 h-7 rounded-lg bg-orange-100 flex items-center justify-center shrink-0 mt-0.5">
                       <span class="material-symbols-outlined text-orange-500 icon-filled" style="font-size: 13px;">notifications</span>
@@ -504,10 +544,10 @@
                         {notif.message ?? notif.title ?? 'Nouvelle notification'}
                       </p>
                       <p class="text-xs text-slate-400 mt-1">
-                        {new Date(notif.createdAt ?? notif.created_at).toLocaleDateString('fr-CM')}
+                        {new Date(notif.createdAt).toLocaleDateString('fr-CM')}
                       </p>
                     </div>
-                    {#if !notif.isRead && !notif.is_read}
+                    {#if notif.isNew}
                       <div class="w-1.5 h-1.5 rounded-full bg-orange-500 shrink-0 mt-1.5"></div>
                     {/if}
                   </div>

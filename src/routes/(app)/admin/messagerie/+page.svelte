@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte'
+  import { onMount, onDestroy, tick } from 'svelte'
   import { auth } from '$lib/stores/auth.svelte'
   import api from '$lib/api'
   import { toast } from '$lib/stores/toast.svelte'
@@ -24,6 +24,36 @@
   let envoiGroupe = $state(false)
 
   let zoneMessages = $state<HTMLDivElement | undefined>(undefined)
+  let nomsAdmins = $state<Record<string, string>>({})
+  let intervalle: ReturnType<typeof setInterval> | undefined
+
+  function estMonId(id: unknown) {
+    return id != null && String(id) === String(auth.user?.id ?? '')
+  }
+
+  function nomAdmin(id: unknown) {
+    return id != null ? nomsAdmins[String(id)] : undefined
+  }
+
+  function nomConversation(conv: any) {
+    if (onglet === 'cabines') return conv.cabinName ?? `Conv. #${String(conv.id ?? '').slice(-6)}`
+    const autre = estMonId(conv.user1Id) ? conv.user2Id : conv.user1Id
+    return nomAdmin(autre) ?? `Conv. #${String(conv.id ?? '').slice(-6)}`
+  }
+
+  function listeDepuis(res: any) {
+    const d = res.data?.data
+    return Array.isArray(d) ? d : []
+  }
+
+  async function chargerNomsAdmins() {
+    try {
+      const res = await api.get('/admin/team')
+      const noms: Record<string, string> = {}
+      for (const u of listeDepuis(res)) if (u?.id) noms[String(u.id)] = u.fullName ?? u.email
+      nomsAdmins = noms
+    } catch {}
+  }
 
   function formaterHeure(d: string | null) {
     if (!d) return ''
@@ -40,8 +70,7 @@
     chargement = true
     try {
       const res = await api.get('/admin/messaging/cabin-conversations')
-      const d = res.data?.data
-      convCabines = d?.data ?? d ?? []
+      convCabines = listeDepuis(res)
     } catch { toast.erreur('Erreur', 'Impossible de charger les conversations') }
     finally { chargement = false }
   }
@@ -50,19 +79,44 @@
     chargement = true
     try {
       const res = await api.get('/admin/messaging/conversations')
-      convAdmins = res.data?.data ?? []
+      convAdmins = listeDepuis(res)
     } catch { toast.erreur('Erreur', 'Impossible de charger les conversations') }
     finally { chargement = false }
   }
 
-  async function chargerGroupe() {
-    chargement = true
+  async function chargerGroupe(silencieux = false) {
+    if (!silencieux) chargement = true
     try {
       const res = await api.get('/admin/messaging/group')
-      const d = res.data?.data
-      messagesGroupe = (d?.data ?? d ?? []).reverse()
-    } catch { toast.erreur('Erreur', 'Impossible de charger le groupe') }
-    finally { chargement = false }
+      messagesGroupe = listeDepuis(res).reverse()
+    } catch { if (!silencieux) toast.erreur('Erreur', 'Impossible de charger le groupe') }
+    finally { if (!silencieux) chargement = false }
+  }
+
+  function endpointMessages(conv: any) {
+    return onglet === 'cabines'
+      ? `/admin/messaging/cabin-conversations/${conv.id}/messages`
+      : `/admin/messaging/conversations/${conv.id}/messages`
+  }
+
+  async function rafraichirMessages() {
+    if (onglet === 'groupe') {
+      if (!envoiGroupe) await chargerGroupe(true)
+      return
+    }
+    const conv = convActive
+    if (!conv || chargementMessages || envoi) return
+    try {
+      const res = await api.get(endpointMessages(conv))
+      if (convActive?.id !== conv.id) return
+      const nouveaux = listeDepuis(res)
+      const avaitNouveaux = nouveaux.length !== messages.length
+      messages = nouveaux
+      if (avaitNouveaux) {
+        await tick()
+        zoneMessages?.scrollTo({ top: zoneMessages.scrollHeight, behavior: 'smooth' })
+      }
+    } catch {}
   }
 
   async function ouvrirConversation(conv: any) {
@@ -70,12 +124,8 @@
     chargementMessages = true
     messages = []
     try {
-      const endpoint = onglet === 'cabines'
-        ? `/admin/messaging/cabin-conversations/${conv.id}/messages`
-        : `/admin/messaging/conversations/${conv.id}/messages`
-      const res = await api.get(endpoint)
-      const d = res.data?.data
-      messages = d?.data ?? d ?? []
+      const res = await api.get(endpointMessages(conv))
+      messages = listeDepuis(res)
       await tick()
       zoneMessages?.scrollTo({ top: zoneMessages.scrollHeight, behavior: 'smooth' })
     } catch { toast.erreur('Erreur', 'Impossible de charger les messages') }
@@ -86,12 +136,11 @@
     if (!contenu.trim() || !convActive) return
     envoi = true
     try {
-      const endpoint = onglet === 'cabines'
-        ? `/admin/messaging/cabin-conversations/${convActive.id}/messages`
-        : `/admin/messaging/conversations/${convActive.id}/messages`
-      const res = await api.post(endpoint, { content: contenu })
-      messages = [...messages, res.data?.data]
+      const res = await api.post(endpointMessages(convActive), { content: contenu })
+      const envoye = res.data?.data
       contenu = ''
+      if (envoye?.id) messages = [...messages, envoye]
+      else await rafraichirMessages()
       await tick()
       zoneMessages?.scrollTo({ top: zoneMessages.scrollHeight, behavior: 'smooth' })
     } catch (e: any) {
@@ -104,8 +153,10 @@
     envoiGroupe = true
     try {
       const res = await api.post('/admin/messaging/group', { content: contenueGroupe })
-      messagesGroupe = [...messagesGroupe, res.data?.data]
+      const envoye = res.data?.data
       contenueGroupe = ''
+      if (envoye?.id) messagesGroupe = [...messagesGroupe, envoye]
+      else await chargerGroupe(true)
       await tick()
       zoneMessages?.scrollTo({ top: zoneMessages.scrollHeight, behavior: 'smooth' })
     } catch (e: any) {
@@ -125,7 +176,12 @@
     else chargerGroupe()
   })
 
-  onMount(chargerConvCabines)
+  onMount(() => {
+    chargerNomsAdmins()
+    intervalle = setInterval(rafraichirMessages, 20000)
+  })
+
+  onDestroy(() => clearInterval(intervalle))
 </script>
 
 <svelte:head><title>Messagerie — TransfertCM Admin</title></svelte:head>
@@ -195,17 +251,17 @@
                   </div>
                   <div class="flex-1 min-w-0">
                     <p class="text-sm font-semibold text-slate-800 truncate">
-                      {conv.cabin_name ?? conv.name ?? `Conv. #${conv.id?.slice(-6)}`}
+                      {nomConversation(conv)}
                     </p>
-                    {#if conv.last_message_preview}
-                      <p class="text-xs text-slate-400 truncate">{conv.last_message_preview}</p>
+                    {#if conv.lastMessagePreview}
+                      <p class="text-xs text-slate-400 truncate">{conv.lastMessagePreview}</p>
                     {/if}
                   </div>
                   <div class="shrink-0 text-right">
-                    <p class="text-xs text-slate-400">{formaterHeure(conv.last_message_at)}</p>
-                    {#if (conv.unread_count_admin ?? 0) > 0}
+                    <p class="text-xs text-slate-400">{formaterHeure(conv.lastMessageAt)}</p>
+                    {#if (conv.unreadCountAdmin ?? 0) > 0}
                       <span class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-orange-500 text-white text-[9px] font-bold mt-1">
-                        {conv.unread_count_admin}
+                        {conv.unreadCountAdmin}
                       </span>
                     {/if}
                   </div>
@@ -236,15 +292,15 @@
             </div>
           {:else}
             {#each messagesGroupe as msg}
-              {@const estMoi = msg.sender_id === auth.user?.id}
+              {@const estMoi = estMonId(msg.senderId)}
               <div class="flex {estMoi ? 'justify-end' : 'justify-start'}">
                 <div class="max-w-xs lg:max-w-md px-4 py-2.5 rounded-2xl text-sm
                   {estMoi ? 'bg-orange-500 text-white rounded-br-sm' : 'bg-slate-100 text-slate-800 rounded-bl-sm'}">
                   {#if !estMoi}
-                    <p class="text-xs font-semibold mb-1 {estMoi ? 'text-orange-100' : 'text-orange-600'}">{msg.sender_name ?? 'Admin'}</p>
+                    <p class="text-xs font-semibold mb-1 {estMoi ? 'text-orange-100' : 'text-orange-600'}">{nomAdmin(msg.senderId) ?? 'Admin'}</p>
                   {/if}
                   <p>{msg.content}</p>
-                  <p class="text-xs mt-1 {estMoi ? 'text-orange-100' : 'text-slate-400'} text-right">{formaterHeure(msg.created_at)}</p>
+                  <p class="text-xs mt-1 {estMoi ? 'text-orange-100' : 'text-slate-400'} text-right">{formaterHeure(msg.createdAt)}</p>
                 </div>
               </div>
             {/each}
@@ -277,7 +333,7 @@
             </span>
           </div>
           <p class="font-semibold text-slate-900 text-sm">
-            {convActive.cabin_name ?? convActive.name ?? `Conversation #${convActive.id?.slice(-6)}`}
+            {nomConversation(convActive)}
           </p>
         </div>
         <div bind:this={zoneMessages} class="flex-1 overflow-y-auto p-4 space-y-3">
@@ -289,12 +345,12 @@
             </div>
           {:else}
             {#each messages as msg}
-              {@const estAdmin = msg.sender_type === 'admin'}
+              {@const estAdmin = onglet === 'cabines' ? msg.senderType === 'admin' : estMonId(msg.senderId)}
               <div class="flex {estAdmin ? 'justify-end' : 'justify-start'}">
                 <div class="max-w-xs lg:max-w-md px-4 py-2.5 rounded-2xl text-sm
                   {estAdmin ? 'bg-orange-500 text-white rounded-br-sm' : 'bg-slate-100 text-slate-800 rounded-bl-sm'}">
                   <p>{msg.content}</p>
-                  <p class="text-xs mt-1 {estAdmin ? 'text-orange-100' : 'text-slate-400'} text-right">{formaterHeure(msg.created_at)}</p>
+                  <p class="text-xs mt-1 {estAdmin ? 'text-orange-100' : 'text-slate-400'} text-right">{formaterHeure(msg.createdAt)}</p>
                 </div>
               </div>
             {/each}

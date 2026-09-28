@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
   import api from '$lib/api'
   import { toast } from '$lib/stores/toast.svelte'
 
@@ -70,6 +69,14 @@
     draft:    { label: 'Brouillon',  classe: 'bg-slate-100 text-slate-600 border-slate-200' },
   }
 
+  const libellesPriorite: Record<string, string> = {
+    low: 'Faible', medium: 'Moyenne', high: 'Haute', urgent: 'Urgente',
+  }
+
+  const libellesService: Record<string, string> = {
+    credit: 'Crédit', forfait: 'Forfait', package: 'Forfait', transfer: 'Transfert', topup: 'Recharge',
+  }
+
   const configPriorite: Record<string, string> = {
     low: 'bg-slate-100 text-slate-600', medium: 'bg-blue-100 text-blue-700',
     high: 'bg-amber-100 text-amber-700', urgent: 'bg-red-100 text-red-700',
@@ -81,9 +88,8 @@
       const params: any = { page: pageRap, per_page: 20 }
       if (filtreStatutRap) params.status = filtreStatutRap
       const res = await api.get('/admin/reports', { params })
-      const d = res.data?.data
-      rapports = d?.data ?? d ?? []
-      metaRap = d?.meta ?? null
+      rapports = res.data?.data ?? []
+      metaRap = res.data?.meta ?? null
     } catch { toast.erreur('Erreur', 'Impossible de charger les rapports') }
     finally { chargement = false }
   }
@@ -94,9 +100,8 @@
       const params: any = { page: pageBud, per_page: 20 }
       if (filtreStatutBud) params.status = filtreStatutBud
       const res = await api.get('/admin/reports/budgets', { params })
-      const d = res.data?.data
-      budgets = d?.data ?? d ?? []
-      metaBud = d?.meta ?? null
+      budgets = res.data?.data ?? []
+      metaBud = res.data?.meta ?? null
     } catch { toast.erreur('Erreur', 'Impossible de charger les budgets') }
     finally { chargement = false }
   }
@@ -181,8 +186,6 @@
     } else if (onglet === 'rapports') chargerRapports()
     else chargerBudgets()
   })
-
-  onMount(chargerFinances)
 </script>
 
 <svelte:head><title>Rapports SGPR — TransfertCM Admin</title></svelte:head>
@@ -249,10 +252,10 @@
     <!-- KPIs -->
     <div class="grid grid-cols-2 md:grid-cols-4 stagger gap-4 mb-5">
       {#each [
-        { label: 'Revenu total', val: formaterMontant(finances.totals?.total_revenue), icone: 'payments', couleur: '#10b981' },
-        { label: 'Montant transféré', val: formaterMontant(finances.totals?.total_amount), icone: 'swap_horiz', couleur: '#007A5E' },
-        { label: 'Commandes complétées', val: finances.totals?.total_orders ?? 0, icone: 'check_circle', couleur: '#3b82f6' },
-        { label: 'Cabines actives', val: (finances.topCabins ?? []).length, icone: 'store', couleur: '#8b5cf6' },
+        { label: 'Total encaissé (frais inclus)', val: formaterMontant(finances.totals?.totalRevenue ?? 0), icone: 'payments', couleur: '#10b981' },
+        { label: 'Montant transféré', val: formaterMontant(finances.totals?.totalAmount ?? 0), icone: 'swap_horiz', couleur: '#007A5E' },
+        { label: 'Frais de service perçus', val: formaterMontant((finances.totals?.totalRevenue ?? 0) - (finances.totals?.totalAmount ?? 0)), icone: 'account_balance', couleur: '#8b5cf6' },
+        { label: 'Commandes complétées', val: finances.totals?.totalOrders ?? 0, icone: 'check_circle', couleur: '#3b82f6' },
       ] as kpi}
         <div class="bg-white rounded-2xl border border-slate-100 card-shadow p-5">
           <div class="w-9 h-9 rounded-xl flex items-center justify-center mb-3" style="background:{kpi.couleur}18">
@@ -282,7 +285,7 @@
                 <div class="flex-1">
                   <div class="flex justify-between mb-1">
                     <span class="text-xs font-semibold text-slate-700 uppercase">{row.network}</span>
-                    <span class="text-xs text-slate-500">{row.total_orders} cmd · {formaterMontant(row.total_amount)}</span>
+                    <span class="text-xs text-slate-500">{row.totalOrders} cmd · {formaterMontant(row.totalAmount)}</span>
                   </div>
                 </div>
               </div>
@@ -303,10 +306,10 @@
           <div class="space-y-2">
             {#each finances.byServiceType as row}
               <div class="flex items-center justify-between py-2 border-b border-slate-50 last:border-0">
-                <span class="text-sm font-medium text-slate-700 capitalize">{row.service_type ?? '—'}</span>
+                <span class="text-sm font-medium text-slate-700">{libellesService[row.serviceType] ?? row.serviceType ?? '—'}</span>
                 <div class="text-right">
-                  <span class="text-sm font-bold text-slate-900">{formaterMontant(row.total_amount)}</span>
-                  <span class="text-xs text-slate-400 ml-2">({row.total_orders} cmd)</span>
+                  <span class="text-sm font-bold text-slate-900">{formaterMontant(row.totalAmount)}</span>
+                  <span class="text-xs text-slate-400 ml-2">({row.totalOrders} cmd)</span>
                 </div>
               </div>
             {/each}
@@ -332,9 +335,9 @@
               <span class="text-sm font-black text-slate-300 w-5 text-center">{i + 1}</span>
               <div class="flex-1 min-w-0">
                 <p class="text-sm font-semibold text-slate-800 truncate">{cab.name ?? '—'}</p>
-                <p class="text-xs text-slate-400">{cab.total_orders} commandes</p>
+                <p class="text-xs text-slate-400">{cab.totalOrders} commandes</p>
               </div>
-              <p class="text-sm font-bold text-slate-900 shrink-0">{formaterMontant(cab.total_amount)}</p>
+              <p class="text-sm font-bold text-slate-900 shrink-0">{formaterMontant(cab.totalAmount)}</p>
             </div>
           {/each}
         </div>
@@ -349,7 +352,7 @@
 
 {:else if onglet === 'rapports'}
   <div class="bg-white rounded-2xl border border-slate-100 card-shadow p-4 mb-5">
-    <select bind:value={filtreStatutRap} onchange={chargerRapports} class="px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
+    <select bind:value={filtreStatutRap} class="px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
       <option value="">Tous les statuts</option>
       <option value="pending">En attente</option>
       <option value="approved">Approuvés</option>
@@ -377,7 +380,7 @@
             </div>
             <div class="flex-1 min-w-0">
               <p class="text-sm font-semibold text-slate-800 truncate">{rap.title ?? '—'}</p>
-              <p class="text-xs text-slate-400 mt-0.5">{formaterDate(rap.created_at)}</p>
+              <p class="text-xs text-slate-400 mt-0.5">{formaterDate(rap.createdAt)}</p>
             </div>
             <span class="text-xs font-semibold px-2.5 py-1 rounded-full border {cfg.classe}">{cfg.label}</span>
             <button onclick={() => voirRapport(rap.id)}
@@ -392,7 +395,7 @@
 
 {:else}
   <div class="bg-white rounded-2xl border border-slate-100 card-shadow p-4 mb-5">
-    <select bind:value={filtreStatutBud} onchange={chargerBudgets} class="px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
+    <select bind:value={filtreStatutBud} class="px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
       <option value="">Tous les statuts</option>
       <option value="draft">Brouillon</option>
       <option value="pending">En attente</option>
@@ -419,13 +422,13 @@
             <div class="flex-1 min-w-0">
               <p class="text-sm font-semibold text-slate-800 truncate">{bud.object ?? '—'}</p>
               <div class="flex items-center gap-2 mt-1">
-                <span class="text-xs font-semibold px-2 py-0.5 rounded-full {configPriorite[bud.priority] ?? 'bg-slate-100 text-slate-600'} capitalize">
-                  {bud.priority ?? '—'}
+                <span class="text-xs font-semibold px-2 py-0.5 rounded-full {configPriorite[bud.priority] ?? 'bg-slate-100 text-slate-600'}">
+                  {libellesPriorite[bud.priority] ?? '—'}
                 </span>
-                <span class="text-xs text-slate-400">{formaterDate(bud.created_at)}</span>
+                <span class="text-xs text-slate-400">{formaterDate(bud.createdAt)}</span>
               </div>
             </div>
-            <p class="text-sm font-bold text-slate-900 shrink-0">{formaterMontant(bud.estimated_amount)}</p>
+            <p class="text-sm font-bold text-slate-900 shrink-0">{formaterMontant(bud.estimatedAmount)}</p>
             <span class="text-xs font-semibold px-2.5 py-1 rounded-full border {cfg.classe} shrink-0">{cfg.label}</span>
             {#if bud.status === 'pending' || bud.status === 'draft'}
               <button onclick={() => approuverBudget(bud.id)} disabled={actionEnCours === bud.id}
@@ -457,16 +460,22 @@
             <p class="text-sm text-slate-700 leading-relaxed">{rapportSelectionne.introduction}</p>
           </div>
         {/if}
-        {#if rapportSelectionne.work_done}
+        {#if rapportSelectionne.workDone}
           <div>
             <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Travaux réalisés</p>
-            <p class="text-sm text-slate-700 leading-relaxed">{rapportSelectionne.work_done}</p>
+            <p class="text-sm text-slate-700 leading-relaxed">{rapportSelectionne.workDone}</p>
           </div>
         {/if}
         {#if rapportSelectionne.conclusions}
           <div>
             <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Conclusions</p>
             <p class="text-sm text-slate-700 leading-relaxed">{rapportSelectionne.conclusions}</p>
+          </div>
+        {/if}
+        {#if rapportSelectionne.status === 'rejected' && rapportSelectionne.rejectionReason}
+          <div>
+            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Motif du rejet</p>
+            <p class="text-sm text-red-600 leading-relaxed">{rapportSelectionne.rejectionReason}</p>
           </div>
         {/if}
         {#if rapportSelectionne.status === 'pending'}

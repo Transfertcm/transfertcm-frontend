@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
   import api from '$lib/api'
   import { toast } from '$lib/stores/toast.svelte'
 
@@ -31,6 +30,17 @@
     rejected:        { label: 'Rejetée',          classe: 'bg-red-100 text-red-700 border-red-200' },
   }
 
+  const libellesType: Record<string, string> = {
+    not_received: 'Transfert non reçu',
+    wrong_product: 'Mauvais produit',
+    other: 'Autre',
+  }
+
+  function libelleType(t: string | null | undefined) {
+    if (!t) return null
+    return libellesType[t] ?? 'Autre'
+  }
+
   function formaterDate(d: string | null) {
     if (!d) return '—'
     return new Date(d).toLocaleDateString('fr-CM', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -42,9 +52,8 @@
       const params: any = { page, per_page: 20 }
       if (filtreStatut) params.status = filtreStatut
       const res = await api.get('/admin/complaints', { params })
-      const d = res.data?.data
-      reclamations = d?.data ?? d ?? []
-      meta = d?.meta ?? null
+      reclamations = Array.isArray(res.data?.data) ? res.data.data : []
+      meta = res.data?.meta ?? null
     } catch {
       toast.erreur('Erreur', 'Impossible de charger les réclamations')
     } finally {
@@ -64,6 +73,10 @@
 
   async function resoudre() {
     if (!selected) return
+    if (resolutionNotes.trim().length < 2) {
+      toast.erreur('Notes requises', 'Décrivez la résolution (au moins 2 caractères)')
+      return
+    }
     actionEnCours = 'resoudre'
     try {
       await api.patch(`/admin/complaints/${selected.id}/resolve`, {
@@ -113,7 +126,6 @@
   }
 
   $effect(() => { filtreStatut; page; charger() })
-  onMount(charger)
 </script>
 
 <svelte:head><title>Réclamations — TransfertCM Admin</title></svelte:head>
@@ -179,23 +191,23 @@
           <div class="lg:col-span-3 flex items-center gap-2 min-w-0">
             <div class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"
               style="background:linear-gradient(135deg, #007A5E 0%, #00A878 100%)">
-              {String(rec.customerPhone ?? rec.customer_phone ?? '?').slice(-2)}
+              {String(rec.customerPhone ?? '?').slice(-2)}
             </div>
             <div class="min-w-0">
               <p class="text-sm font-semibold text-slate-800 font-mono truncate">
-                {rec.customerPhone ?? rec.customer_phone ?? '—'}
+                {rec.customerPhone ?? '—'}
               </p>
-              {#if rec.subject}
-                <p class="text-xs text-slate-400 truncate">{rec.subject}</p>
+              {#if rec.complaintType}
+                <p class="text-xs text-slate-400 truncate">{libelleType(rec.complaintType)}</p>
               {/if}
             </div>
           </div>
           <!-- Commande -->
           <div class="lg:col-span-3">
-            {#if rec.orderId ?? rec.order_id}
-              <a href="/admin/commandes/{rec.orderId ?? rec.order_id}"
+            {#if rec.orderId}
+              <a href="/admin/commandes/{rec.orderId}"
                 class="text-xs font-mono text-orange-600 hover:text-orange-700 font-semibold">
-                #{String(rec.orderId ?? rec.order_id ?? '').slice(-8)}
+                #{rec.orderCode ?? String(rec.orderId ?? '').slice(-8)}
               </a>
             {:else}
               <span class="text-xs text-slate-400">—</span>
@@ -209,7 +221,7 @@
           </div>
           <!-- Date -->
           <div class="lg:col-span-2">
-            <p class="text-xs text-slate-500">{formaterDate(rec.createdAt ?? rec.created_at)}</p>
+            <p class="text-xs text-slate-500">{formaterDate(rec.createdAt)}</p>
           </div>
           <!-- Actions -->
           <div class="lg:col-span-2 flex gap-1.5">
@@ -270,7 +282,7 @@
         <div class="grid grid-cols-2 gap-4 text-sm">
           <div>
             <p class="text-xs text-slate-400 mb-0.5">Client</p>
-            <p class="font-semibold text-slate-800 font-mono">{selected.customerPhone ?? selected.customer_phone ?? '—'}</p>
+            <p class="font-semibold text-slate-800 font-mono">{selected.customerPhone ?? '—'}</p>
           </div>
           <div>
             <p class="text-xs text-slate-400 mb-0.5">Statut</p>
@@ -279,10 +291,10 @@
               <span class="text-xs font-semibold px-2.5 py-1 rounded-full border {cfg.classe}">{cfg.label}</span>
             {/if}
           </div>
-          {#if selected.subject}
+          {#if selected.complaintType}
             <div class="col-span-2">
-              <p class="text-xs text-slate-400 mb-0.5">Sujet</p>
-              <p class="font-semibold text-slate-800">{selected.subject}</p>
+              <p class="text-xs text-slate-400 mb-0.5">Type</p>
+              <p class="font-semibold text-slate-800">{libelleType(selected.complaintType)}</p>
             </div>
           {/if}
           {#if selected.description}
@@ -293,14 +305,14 @@
           {/if}
           <div>
             <p class="text-xs text-slate-400 mb-0.5">Date</p>
-            <p class="text-sm text-slate-700">{formaterDate(selected.createdAt ?? selected.created_at)}</p>
+            <p class="text-sm text-slate-700">{formaterDate(selected.createdAt)}</p>
           </div>
-          {#if selected.orderId ?? selected.order_id}
+          {#if selected.orderId}
             <div>
               <p class="text-xs text-slate-400 mb-0.5">Commande liée</p>
-              <a href="/admin/commandes/{selected.orderId ?? selected.order_id}"
+              <a href="/admin/commandes/{selected.orderId}"
                 class="text-sm font-mono text-orange-600 hover:text-orange-700 font-semibold">
-                #{String(selected.orderId ?? selected.order_id ?? '').slice(-8)}
+                #{selected.orderCode ?? String(selected.orderId ?? '').slice(-8)}
               </a>
             </div>
           {/if}
@@ -323,12 +335,13 @@
                 </select>
               </div>
               <div>
-                <label for="res-notes" class="block text-xs font-semibold text-slate-600 mb-1.5">Notes de résolution</label>
+                <label for="res-notes" class="block text-xs font-semibold text-slate-600 mb-1.5">Notes de résolution *</label>
                 <textarea id="res-notes" bind:value={resolutionNotes} rows="2"
                   placeholder="Décrivez la résolution..."
                   class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm resize-none"></textarea>
+                <p class="text-xs text-slate-500 mt-1">Obligatoire : au moins 2 caractères.</p>
               </div>
-              <button onclick={resoudre} disabled={actionEnCours === 'resoudre'}
+              <button onclick={resoudre} disabled={resolutionNotes.trim().length < 2 || actionEnCours === 'resoudre'}
                 class="w-full px-4 py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-2">
                 {#if actionEnCours === 'resoudre'}
                   <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
@@ -348,7 +361,7 @@
                   placeholder="Expliquez pourquoi la réclamation est rejetée..."
                   class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm resize-none"></textarea>
               </div>
-              <button onclick={rejeter} disabled={!raisonRejet || actionEnCours === 'rejeter'}
+              <button onclick={rejeter} disabled={raisonRejet.trim().length < 2 || actionEnCours === 'rejeter'}
                 class="w-full px-4 py-2.5 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2">
                 {#if actionEnCours === 'rejeter'}
                   <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>

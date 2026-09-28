@@ -11,6 +11,14 @@
   let afficherModalBroadcast = $state(false)
   let broadcast = $state({ type: 'info', title: '', message: '' })
   let envoi = $state(false)
+  let nbNonLues = $state(0)
+
+  async function chargerCompteur() {
+    try {
+      const res = await api.get('/admin/notifications/count')
+      nbNonLues = Number(res.data?.data?.count ?? 0)
+    } catch {}
+  }
 
   function formaterDate(d: string) {
     if (!d) return '—'
@@ -29,9 +37,8 @@
       const params: any = { page, per_page: 30 }
       if (filtreNonLues) params.is_new = 'true'
       const res = await api.get('/admin/notifications', { params })
-      const d = res.data?.data
-      notifications = d?.data ?? d ?? []
-      meta = d?.meta ?? null
+      notifications = Array.isArray(res.data?.data) ? res.data.data : []
+      meta = res.data?.meta ?? null
     } catch {
       toast.erreur('Erreur', 'Impossible de charger les notifications')
     } finally {
@@ -42,14 +49,20 @@
   async function marquerLu(id: string) {
     try {
       await api.patch(`/admin/notifications/${id}/read`)
-      notifications = notifications.map(n => n.id === id ? { ...n, is_new: false } : n)
-    } catch {}
+      notifications = filtreNonLues
+        ? notifications.filter(n => n.id !== id)
+        : notifications.map(n => n.id === id ? { ...n, isNew: false } : n)
+      nbNonLues = Math.max(0, nbNonLues - 1)
+    } catch {
+      toast.erreur('Erreur', 'Impossible de marquer comme lue')
+    }
   }
 
   async function toutMarquerLu() {
     try {
       await api.patch('/admin/notifications/read-all')
-      notifications = notifications.map(n => ({ ...n, is_new: false }))
+      notifications = filtreNonLues ? [] : notifications.map(n => ({ ...n, isNew: false }))
+      nbNonLues = 0
       toast.succes('Toutes les notifications ont été lues')
     } catch {
       toast.erreur('Erreur', 'Impossible de marquer comme lues')
@@ -60,8 +73,12 @@
     if (!broadcast.title || !broadcast.message) return
     envoi = true
     try {
-      const res = await api.post('/admin/notifications/broadcast', broadcast)
-      toast.succes('Notification envoyée', res.data?.message)
+      const res = await api.post('/admin/notifications/broadcast', {
+        type: broadcast.type,
+        title: broadcast.title.trim(),
+        message: broadcast.message.trim(),
+      })
+      toast.succes('Notification envoyée', res.data?.data?.message ?? res.data?.message)
       afficherModalBroadcast = false
       broadcast = { type: 'info', title: '', message: '' }
     } catch (e: any) {
@@ -71,10 +88,8 @@
     }
   }
 
-  const nbNonLues = $derived(notifications.filter(n => n.is_new).length)
-
   $effect(() => { filtreNonLues; page; charger() })
-  onMount(charger)
+  onMount(chargerCompteur)
 </script>
 
 <svelte:head><title>Notifications — TransfertCM Admin</title></svelte:head>
@@ -101,7 +116,7 @@
 <!-- Filtre -->
 <div class="flex items-center gap-3 mb-5">
   <label class="flex items-center gap-2 cursor-pointer">
-    <input type="checkbox" bind:checked={filtreNonLues} class="w-4 h-4 accent-orange-500 rounded" />
+    <input type="checkbox" bind:checked={filtreNonLues} onchange={() => page = 1} class="w-4 h-4 accent-orange-500 rounded" />
     <span class="text-sm font-medium text-slate-700">Non lues seulement</span>
   </label>
   {#if nbNonLues > 0}
@@ -127,11 +142,11 @@
     <div class="divide-y divide-slate-50">
       {#each notifications as notif}
         <div
-          class="flex items-start gap-4 px-5 py-4 transition-all {notif.is_new ? 'bg-orange-50/40' : 'hover:bg-slate-50'}"
+          class="flex items-start gap-4 px-5 py-4 transition-all {notif.isNew ? 'bg-orange-50/40' : 'hover:bg-slate-50'}"
         >
           <div class="w-9 h-9 rounded-xl bg-orange-100 flex items-center justify-center shrink-0 mt-0.5">
             <span class="material-symbols-outlined text-orange-500 icon-filled" style="font-size:18px">
-              {notif.type === 'order' ? 'receipt_long' : notif.type === 'payment' ? 'payments' : 'notifications'}
+              {String(notif.type ?? '').includes('order') ? 'receipt_long' : String(notif.type ?? '').includes('payment') ? 'payments' : 'notifications'}
             </span>
           </div>
           <div class="flex-1 min-w-0">
@@ -139,10 +154,10 @@
             {#if notif.title && notif.message}
               <p class="text-xs text-slate-500 mt-0.5 line-clamp-2">{notif.message}</p>
             {/if}
-            <p class="text-xs text-slate-400 mt-1">{formaterDate(notif.createdAt ?? notif.created_at)}</p>
+            <p class="text-xs text-slate-400 mt-1">{formaterDate(notif.createdAt)}</p>
           </div>
           <div class="flex items-center gap-2 shrink-0">
-            {#if notif.is_new}
+            {#if notif.isNew}
               <div class="w-2 h-2 rounded-full bg-orange-500"></div>
               <button
                 onclick={() => marquerLu(notif.id)}
@@ -201,7 +216,7 @@
         </div>
         <div class="flex gap-3">
           <button onclick={() => afficherModalBroadcast = false} class="btn-secondary flex-1">Annuler</button>
-          <button onclick={envoyerBroadcast} disabled={!broadcast.title || !broadcast.message || envoi} class="btn-primary flex-1 justify-center">
+          <button onclick={envoyerBroadcast} disabled={!broadcast.title.trim() || !broadcast.message.trim() || envoi} class="btn-primary flex-1 justify-center">
             {#if envoi}
               <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
             {:else}

@@ -1,7 +1,9 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { untrack } from 'svelte'
   import api from '$lib/api'
   import { toast } from '$lib/stores/toast.svelte'
+  import { auth } from '$lib/stores/auth.svelte'
+  import Modal from '$lib/components/ui/Modal.svelte'
 
   let agents = $state<any[]>([])
   let meta = $state<any>(null)
@@ -16,6 +18,8 @@
   let afficherModalDetail = $state(false)
   let agentSelectionne = $state<any>(null)
   let statsAgent = $state<any>(null)
+  let statsChargement = $state(false)
+  let statsErreur = $state('')
   let creation = $state(false)
 
   let form = $state({
@@ -23,6 +27,16 @@
     city: '', neighborhood: '', idNumber: '', idType: 'CNI',
   })
   let erreurs = $state<Record<string, string>>({})
+
+  let editionPiece = $state(false)
+  let formPiece = $state({ idType: '', idNumber: '' })
+  let enregistrementPiece = $state(false)
+  let confirmationDesactivation = $state(false)
+  let desactivation = $state(false)
+
+  const libellesStatut: Record<string, string> = { active: 'Actif', inactive: 'Inactif', suspended: 'Suspendu' }
+
+  const peutGerer = $derived(auth.peut('canViewPromoAgents'))
 
   function formaterDate(d: string | null) {
     if (!d) return '—'
@@ -43,31 +57,42 @@
       const params: any = { page, per_page: 20 }
       if (filtreStatut) params.status = filtreStatut
       if (filtreVille) params.city = filtreVille
+      if (recherche.trim()) params.search = recherche.trim()
       const res = await api.get('/admin/promo-agents', { params })
-      const d = res.data?.data
-      agents = d?.data ?? d ?? []
-      meta = d?.meta ?? null
+      agents = res.data?.data ?? []
+      meta = res.data?.meta ?? null
     } catch { toast.erreur('Erreur', 'Impossible de charger les agents') }
     finally { chargement = false }
   }
 
   async function voirDetail(agent: any) {
     agentSelectionne = agent
+    editionPiece = false
     statsAgent = null
+    statsErreur = ''
+    statsChargement = true
     afficherModalDetail = true
     try {
       const res = await api.get(`/admin/promo-agents/${agent.id}`)
       agentSelectionne = res.data?.data ?? agent
+    } catch {}
+    try {
       const statsRes = await api.get(`/admin/promo-agents/${agent.id}/stats`)
       statsAgent = statsRes.data?.data ?? null
-    } catch {}
+    } catch (e: any) {
+      statsErreur = e.response?.data?.message ?? 'Impossible de charger les statistiques'
+    } finally { statsChargement = false }
   }
 
   async function creerAgent() {
     erreurs = {}
     creation = true
     try {
-      await api.post('/admin/promo-agents', form)
+      const payload: Record<string, string> = { firstName: form.firstName, lastName: form.lastName, phone: form.phone, idType: form.idType }
+      for (const cle of ['city', 'neighborhood', 'idNumber'] as const) {
+        if (form[cle].trim()) payload[cle] = form[cle].trim()
+      }
+      await api.post('/admin/promo-agents', payload)
       toast.succes('Agent créé', `Code de parrainage généré automatiquement`)
       afficherModalCreer = false
       form = { firstName: '', lastName: '', phone: '', city: '', neighborhood: '', idNumber: '', idType: 'CNI' }
@@ -76,19 +101,52 @@
       if (e.response?.status === 422) {
         e.response.data?.errors?.forEach((err: any) => { erreurs[err.field] = err.message })
       } else {
-        toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de créer')
+        if (!e.toastAffiche) toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de créer')
       }
     } finally { creation = false }
   }
 
+  function ouvrirEditionPiece() {
+    formPiece = { idType: agentSelectionne?.idType ?? '', idNumber: agentSelectionne?.idNumber ?? '' }
+    editionPiece = true
+  }
+
+  async function enregistrerPiece() {
+    if (!agentSelectionne) return
+    enregistrementPiece = true
+    try {
+      const modifs = { idType: formPiece.idType || null, idNumber: formPiece.idNumber.trim() || null }
+      await api.put(`/admin/promo-agents/${agentSelectionne.id}`, modifs)
+      agentSelectionne = { ...agentSelectionne, ...modifs }
+      agents = agents.map((a) => a.id === agentSelectionne.id ? { ...a, idType: modifs.idType } : a)
+      editionPiece = false
+      toast.succes('Pièce d\'identité mise à jour')
+    } catch (e: any) {
+      if (!e.toastAffiche) toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de mettre à jour')
+    } finally { enregistrementPiece = false }
+  }
+
+  async function desactiverAgent() {
+    if (!agentSelectionne) return
+    desactivation = true
+    try {
+      await api.delete(`/admin/promo-agents/${agentSelectionne.id}`)
+      agentSelectionne = { ...agentSelectionne, status: 'inactive' }
+      confirmationDesactivation = false
+      toast.succes('Agent désactivé')
+      await charger()
+    } catch (e: any) {
+      if (!e.toastAffiche) toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de désactiver')
+    } finally { desactivation = false }
+  }
+
   let timer: ReturnType<typeof setTimeout>
-  function surRecherche() {
+  function surSaisie() {
     clearTimeout(timer)
     timer = setTimeout(() => { page = 1; charger() }, 400)
   }
 
-  $effect(() => { filtreStatut; filtreVille; page; charger() })
-  onMount(charger)
+  $effect(() => { filtreStatut; page; untrack(charger) })
 </script>
 
 <svelte:head><title>Agents promo — TransfertCM Admin</title></svelte:head>
@@ -96,12 +154,14 @@
 <div class="mb-6 flex items-center justify-between flex-wrap gap-3">
   <div>
     <h2 class="font-black text-2xl text-slate-900" style="letter-spacing:-0.02em">Agents promoteurs</h2>
-    <p class="text-sm text-slate-500 mt-0.5">{meta ? `${meta.total ?? 0} agents` : 'Gestion des agents de terrain'}</p>
+    <p class="text-sm text-slate-500 mt-0.5">{meta ? `${meta.total ?? 0} agent(s)` : 'Gestion des agents de terrain'}</p>
   </div>
-  <button onclick={() => afficherModalCreer = true} class="btn-primary">
-    <span class="material-symbols-outlined icon-filled" style="font-size:18px">person_add</span>
-    Nouvel agent
-  </button>
+  {#if peutGerer}
+    <button onclick={() => afficherModalCreer = true} class="btn-primary">
+      <span class="material-symbols-outlined icon-filled" style="font-size:18px">person_add</span>
+      Nouvel agent
+    </button>
+  {/if}
 </div>
 
 <!-- Filtres -->
@@ -109,7 +169,7 @@
   <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
     <div class="relative">
       <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" style="font-size:16px">search</span>
-      <input type="text" placeholder="Rechercher..." bind:value={recherche} oninput={surRecherche}
+      <input type="text" placeholder="Rechercher (nom, téléphone, code)..." bind:value={recherche} oninput={surSaisie}
         class="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
     </div>
     <select bind:value={filtreStatut} class="px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
@@ -118,7 +178,7 @@
       <option value="inactive">Inactif</option>
       <option value="suspended">Suspendu</option>
     </select>
-    <input type="text" placeholder="Filtrer par ville..." bind:value={filtreVille} oninput={surRecherche}
+    <input type="text" placeholder="Filtrer par ville..." bind:value={filtreVille} oninput={surSaisie}
       class="px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
   </div>
 </div>
@@ -143,15 +203,15 @@
         <div class="flex items-start gap-3 mb-4">
           <div class="w-11 h-11 rounded-xl flex items-center justify-center text-white font-bold text-sm shrink-0"
             style="background:linear-gradient(135deg, #007A5E 0%, #00A878 100%)">
-            {(agent.first_name ?? '?')[0]}{(agent.last_name ?? '?')[0]}
+            {(agent.firstName ?? '?')[0]}{(agent.lastName ?? '?')[0]}
           </div>
           <div class="flex-1 min-w-0">
-            <p class="text-sm font-bold text-slate-900 truncate">{agent.first_name} {agent.last_name}</p>
-            <p class="text-xs font-mono text-orange-600 font-semibold">{agent.referral_code ?? '—'}</p>
+            <p class="text-sm font-bold text-slate-900 truncate">{agent.firstName} {agent.lastName}</p>
+            <p class="text-xs font-mono text-orange-600 font-semibold">{agent.referralCode ?? '—'}</p>
           </div>
           <span class="text-xs font-semibold px-2 py-0.5 rounded-full
             {agent.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}">
-            {agent.status === 'active' ? 'Actif' : agent.status ?? '—'}
+            {libellesStatut[agent.status] ?? '—'}
           </span>
         </div>
         <div class="grid grid-cols-2 gap-3 text-xs">
@@ -164,12 +224,20 @@
             <p class="font-semibold text-slate-700">{agent.city ?? '—'}</p>
           </div>
           <div>
-            <p class="text-slate-400 mb-0.5">Parrainages</p>
-            <p class="font-bold text-slate-900">{agent.total_referrals ?? 0}</p>
+            <p class="text-slate-400 mb-0.5">Quartier</p>
+            <p class="font-semibold text-slate-700">{agent.neighborhood ?? '—'}</p>
           </div>
           <div>
             <p class="text-slate-400 mb-0.5">Inscrit le</p>
-            <p class="font-semibold text-slate-700">{formaterDate(agent.created_at)}</p>
+            <p class="font-semibold text-slate-700">{formaterDate(agent.createdAt)}</p>
+          </div>
+          <div>
+            <p class="text-slate-400 mb-0.5">Parrainages</p>
+            <p class="font-semibold text-slate-700">{agent.totalReferrals ?? 0}</p>
+          </div>
+          <div>
+            <p class="text-slate-400 mb-0.5">Commandes</p>
+            <p class="font-semibold text-slate-700">{agent.totalOrders ?? 0}</p>
           </div>
         </div>
       </button>
@@ -195,11 +263,11 @@
         <div class="flex items-center gap-3">
           <div class="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold shrink-0"
             style="background:linear-gradient(135deg, #007A5E 0%, #00A878 100%)">
-            {(agentSelectionne.first_name ?? '?')[0]}{(agentSelectionne.last_name ?? '?')[0]}
+            {(agentSelectionne.firstName ?? '?')[0]}{(agentSelectionne.lastName ?? '?')[0]}
           </div>
           <div>
-            <p class="font-bold text-slate-900">{agentSelectionne.first_name} {agentSelectionne.last_name}</p>
-            <p class="text-xs font-mono text-orange-600">{agentSelectionne.referral_code}</p>
+            <p class="font-bold text-slate-900">{agentSelectionne.firstName} {agentSelectionne.lastName}</p>
+            <p class="text-xs font-mono text-orange-600">{agentSelectionne.referralCode}</p>
           </div>
         </div>
         <button onclick={() => afficherModalDetail = false} class="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400">
@@ -213,9 +281,8 @@
             ['Téléphone', agentSelectionne.phone],
             ['Ville', agentSelectionne.city],
             ['Quartier', agentSelectionne.neighborhood],
-            ['N° pièce', agentSelectionne.id_number],
-            ['Type pièce', agentSelectionne.id_type],
-            ['Inscrit le', formaterDate(agentSelectionne.created_at)],
+            ['Statut', libellesStatut[agentSelectionne.status]],
+            ['Inscrit le', formaterDate(agentSelectionne.createdAt)],
           ] as [label, val]}
             {#if val}
               <div>
@@ -226,15 +293,56 @@
           {/each}
         </div>
 
+        <div class="p-4 rounded-xl border border-slate-100">
+          <div class="flex items-center justify-between mb-2">
+            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Pièce d'identité</p>
+            {#if peutGerer && !editionPiece}
+              <button onclick={ouvrirEditionPiece} title="Modifier"
+                class="w-8 h-8 rounded-lg hover:bg-orange-50 flex items-center justify-center text-slate-400 hover:text-orange-500">
+                <span class="material-symbols-outlined" style="font-size:16px">edit</span>
+              </button>
+            {/if}
+          </div>
+          {#if editionPiece}
+            <div class="grid grid-cols-2 gap-3">
+              <select bind:value={formPiece.idType} aria-label="Type de pièce" class="px-3 py-2 rounded-xl border border-slate-200 text-sm">
+                <option value="">Aucune</option>
+                <option value="CNI">CNI</option>
+                <option value="Passeport">Passeport</option>
+                <option value="Permis">Permis</option>
+              </select>
+              <input type="text" bind:value={formPiece.idNumber} placeholder="Numéro de pièce" aria-label="Numéro de pièce"
+                class="px-3 py-2 rounded-xl border border-slate-200 text-sm" />
+            </div>
+            <div class="flex gap-2 mt-3">
+              <button onclick={() => editionPiece = false} class="btn-secondary flex-1">Annuler</button>
+              <button onclick={enregistrerPiece} disabled={enregistrementPiece} class="btn-primary flex-1 justify-center">
+                {#if enregistrementPiece}<span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>{:else}Enregistrer{/if}
+              </button>
+            </div>
+          {:else}
+            <div class="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <p class="text-xs text-slate-400 mb-0.5">Type</p>
+                <p class="font-semibold text-slate-800">{agentSelectionne.idType ?? '—'}</p>
+              </div>
+              <div>
+                <p class="text-xs text-slate-400 mb-0.5">Numéro</p>
+                <p class="font-semibold text-slate-800">{agentSelectionne.idNumber ?? '—'}</p>
+              </div>
+            </div>
+          {/if}
+        </div>
+
         <!-- Stats -->
         {#if statsAgent}
           <div>
             <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-3">Statistiques</p>
             <div class="grid grid-cols-3 gap-3">
               {#each [
-                ['Parrainages', statsAgent.stats?.total_referrals ?? 0, 'people'],
-                ['Commandes', statsAgent.stats?.total_orders ?? 0, 'receipt_long'],
-                ['Volume', formaterMontant(statsAgent.stats?.total_amount), 'payments'],
+                ['Parrainages', statsAgent.stats?.totalReferrals ?? 0, 'people'],
+                ['Commandes', statsAgent.stats?.totalOrders ?? 0, 'receipt_long'],
+                ['Volume', formaterMontant(statsAgent.stats?.totalAmount ?? 0), 'payments'],
               ] as [label, val, icone]}
                 <div class="p-3 rounded-xl bg-orange-50 border border-orange-100 text-center">
                   <span class="material-symbols-outlined text-orange-500 icon-filled" style="font-size:18px">{icone}</span>
@@ -252,19 +360,31 @@
               <div class="space-y-2">
                 {#each statsAgent.topClients.slice(0, 5) as client}
                   <div class="flex items-center justify-between text-sm">
-                    <span class="font-mono text-slate-700">{client.client_phone}</span>
+                    <span class="font-mono text-slate-700">{client.clientPhone}</span>
                     <div class="flex items-center gap-3">
-                      <span class="text-slate-500">{client.order_count} cmd</span>
-                      <span class="font-semibold text-slate-900">{formaterMontant(client.total_amount)}</span>
+                      <span class="text-slate-500">{client.orderCount} cmd</span>
+                      <span class="font-semibold text-slate-900">{formaterMontant(client.totalAmount)}</span>
                     </div>
                   </div>
                 {/each}
               </div>
             </div>
           {/if}
-        {:else}
+        {:else if statsChargement}
           <div class="flex justify-center py-4">
             <span class="w-6 h-6 border-2 border-orange-200 border-t-orange-500 rounded-full animate-spin"></span>
+          </div>
+        {:else}
+          <p class="text-sm text-slate-400 text-center py-4">{statsErreur || 'Aucune statistique disponible'}</p>
+        {/if}
+
+        {#if peutGerer && agentSelectionne.status !== 'inactive'}
+          <div class="pt-4 border-t border-slate-100 flex justify-end">
+            <button onclick={() => confirmationDesactivation = true}
+              class="px-3 py-2 rounded-xl border border-red-200 text-red-600 text-sm font-semibold hover:bg-red-50 flex items-center gap-1.5">
+              <span class="material-symbols-outlined" style="font-size:16px">person_off</span>
+              Désactiver
+            </button>
           </div>
         {/if}
       </div>
@@ -337,3 +457,17 @@
   </div>
 {/if}
 
+<Modal bind:ouvert={confirmationDesactivation} titre="Désactiver cet agent ?" largeur="sm">
+  <div class="p-6 space-y-4">
+    <p class="text-sm text-slate-600">
+      <span class="font-semibold">{agentSelectionne?.firstName} {agentSelectionne?.lastName}</span> passera au statut « Inactif ». Son historique et ses parrainages sont conservés.
+    </p>
+    <div class="flex gap-3">
+      <button onclick={() => confirmationDesactivation = false} class="btn-secondary flex-1">Annuler</button>
+      <button onclick={desactiverAgent} disabled={desactivation}
+        class="flex-1 px-4 py-2.5 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 disabled:opacity-50">
+        {desactivation ? '...' : 'Désactiver'}
+      </button>
+    </div>
+  </div>
+</Modal>

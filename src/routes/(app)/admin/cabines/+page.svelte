@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { untrack } from 'svelte'
   import api from '$lib/api'
   import { toast } from '$lib/stores/toast.svelte'
   import Badge from '$lib/components/ui/Badge.svelte'
@@ -21,33 +21,14 @@
     name: '', managerName: '', email: '', password: '', phone: '',
     city: '', location: '', type: 'basic',
     mtnNumber: '', orangeNumber: '',
-    subscriptionType: 'basic',
   })
   let erreurs = $state<Record<string, string>>({})
-
-  type PlanConfig = { name: string; price: number; maxOrders: number }
-  let plans = $state<Record<string, PlanConfig>>({
-    basic:    { name: 'Basic',    price: 5000,  maxOrders: 100 },
-    standard: { name: 'Standard', price: 10000, maxOrders: 300 },
-    premium:  { name: 'Premium',  price: 20000, maxOrders: 999 },
-  })
-
-  async function chargerPlans() {
-    try {
-      const res = await api.get('/admin/settings/subscription_plans')
-      const setting = res.data?.data
-      if (setting?.value) {
-        const parsed = typeof setting.value === 'string' ? JSON.parse(setting.value) : setting.value
-        plans = { ...plans, ...parsed }
-      }
-    } catch { /* valeurs par défaut */ }
-  }
 
   const statuts = $derived([
     { val: '', label: $t('admin.cabins.all_statuses') },
     { val: 'active', label: $t('status.active') },
-    { val: 'suspended', label: $t('status.suspended') },
     { val: 'paused', label: $t('status.paused') },
+    { val: 'suspended', label: $t('status.suspended') },
     { val: 'inactive', label: $t('status.inactive') },
   ])
 
@@ -62,7 +43,8 @@
     chargement = true
     try {
       const params: any = { page, perPage: 20 }
-      if (filtreStatut) params.status = filtreStatut
+      if (filtreStatut === 'paused') params.paused = 'true'
+      else if (filtreStatut) params.status = filtreStatut
       if (filtreType) params.type = filtreType
       if (filtreVille) params.city = filtreVille
       if (recherche) params.search = recherche
@@ -92,7 +74,7 @@
       await api.post('/cabins', payload)
       toast.succes(translate('admin.cabins.created'))
       afficherModal = false
-      nouvelleCabine = { name: '', managerName: '', email: '', password: '', phone: '', city: '', location: '', type: 'basic', mtnNumber: '', orangeNumber: '', subscriptionType: 'basic' }
+      nouvelleCabine = { name: '', managerName: '', email: '', password: '', phone: '', city: '', location: '', type: 'basic', mtnNumber: '', orangeNumber: '' }
       await charger()
     } catch (e: any) {
       const status = e.response?.status
@@ -120,8 +102,7 @@
     timer = setTimeout(() => { page = 1; charger() }, 400)
   }
 
-  $effect(() => { filtreStatut; filtreType; filtreVille; page; charger() })
-  onMount(() => { charger(); chargerPlans() })
+  $effect(() => { filtreStatut; filtreType; page; untrack(charger) })
 
   const couleurType: Record<string, string> = {
     basic: 'bg-slate-100 text-slate-500',
@@ -153,10 +134,10 @@
       <input type="text" placeholder={$t('admin.cabins.search_placeholder')} bind:value={recherche} oninput={surRecherche}
         class="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
     </div>
-    <select bind:value={filtreStatut} class="px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
+    <select bind:value={filtreStatut} onchange={() => page = 1} class="px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
       {#each statuts as s}<option value={s.val}>{s.label}</option>{/each}
     </select>
-    <select bind:value={filtreType} class="px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
+    <select bind:value={filtreType} onchange={() => page = 1} class="px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
       {#each types as tp}<option value={tp.val}>{tp.label}</option>{/each}
     </select>
     <input type="text" placeholder={$t('admin.cabins.filter_city')} bind:value={filtreVille} oninput={surRecherche}
@@ -209,7 +190,7 @@
           </div>
           <div class="lg:col-span-1">
             <span class="text-xs font-semibold px-2 py-0.5 rounded-full capitalize {couleurType[cab.type] ?? 'bg-slate-100 text-slate-600'}">
-              {cab.type ?? '—'}
+              {cab.type ? $t(`admin.cabins.type.${cab.type}`) : '—'}
             </span>
           </div>
           <div class="lg:col-span-2">
@@ -220,7 +201,7 @@
             <p class="text-xs text-slate-400">UV</p>
           </div>
           <div class="lg:col-span-2">
-            <Badge statut={cab.status ?? 'inactive'} />
+            <Badge statut={cab.paused && cab.status === 'active' ? 'paused' : (cab.status ?? 'inactive')} />
           </div>
           <div class="lg:col-span-1">
             <a href="/admin/cabines/{cab.id}" class="w-7 h-7 rounded-lg hover:bg-orange-50 flex items-center justify-center text-slate-400 hover:text-orange-500" title={$t('common.view')}>
@@ -316,22 +297,9 @@
             <input id="cab-orange" type="tel" bind:value={nouvelleCabine.orangeNumber} placeholder="69XXXXXXX" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
           </div>
         </div>
-        <!-- Plan d'abonnement -->
-        <div class="p-4 rounded-xl bg-orange-50 border border-orange-100 space-y-3">
-          <p class="text-xs font-semibold text-orange-700">Plan d'abonnement initial</p>
-          <div class="grid grid-cols-3 gap-2">
-            {#each Object.entries(plans) as [key, plan]}
-              <label class="cursor-pointer">
-                <input type="radio" bind:group={nouvelleCabine.subscriptionType} value={key} class="sr-only" />
-                <div class="p-3 rounded-xl border-2 text-center transition-all {nouvelleCabine.subscriptionType === key ? 'border-orange-500 bg-white' : 'border-transparent bg-white/60 hover:bg-white'}">
-                  <p class="text-xs font-bold text-slate-800">{plan.name}</p>
-                  <p class="text-sm font-black text-orange-600 mt-0.5">{plan.price.toLocaleString('fr-CM')}</p>
-                  <p class="text-[10px] text-slate-400">XAF/mois</p>
-                </div>
-              </label>
-            {/each}
-          </div>
-          <p class="text-[11px] text-orange-600">L'abonnement sera activé immédiatement (1 mois)</p>
+        <div class="p-4 rounded-xl bg-orange-50 border border-orange-100">
+          <p class="text-xs font-semibold text-orange-700">Abonnement</p>
+          <p class="text-[11px] text-orange-600 mt-1">La cabine est créée sans abonnement actif. Activez son abonnement depuis sa fiche après la création.</p>
         </div>
 
         <div class="flex gap-3 pt-2">

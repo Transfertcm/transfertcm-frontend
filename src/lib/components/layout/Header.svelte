@@ -1,12 +1,14 @@
 <script lang="ts">
   import { page } from '$app/stores'
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
   import { derived } from 'svelte/store'
   import { goto } from '$app/navigation'
   import { auth } from '$lib/stores/auth.svelte'
   import { t } from '$lib/stores/locale'
   import api from '$lib/api'
   import LanguageSwitcher from '$lib/components/ui/LanguageSwitcher.svelte'
+  import { libelleStatut, configStatuts } from '$lib/components/ui/Badge.svelte'
+  import type { Permission } from '$lib/permissions'
 
   let { surToggleSidebar } = $props<{ surToggleSidebar: () => void }>()
 
@@ -17,6 +19,7 @@
   let rechercheQuery  = $state('')
   let rechercheResults = $state<any[]>([])
   let rechercheLoading = $state(false)
+  let rechercheErreur = $state(false)
   let afficherRecherche = $state(false)
   let rechercheTimer: ReturnType<typeof setTimeout> | null = null
   let filtreType = $state<'all' | 'order' | 'cabin' | 'complaint' | 'promo_agent'>('all')
@@ -40,11 +43,38 @@
   const TYPE_BG: Record<string, string>      = { order: 'bg-orange-50', cabin: 'bg-amber-50', complaint: 'bg-red-50', promo_agent: 'bg-violet-50' }
   const TYPE_TEXT: Record<string, string>    = { order: 'text-orange-500', cabin: 'text-amber-500', complaint: 'text-red-500', promo_agent: 'text-violet-500' }
   const TYPE_LABEL: Record<string, string>   = { order: 'Commande', cabin: 'Cabine', complaint: 'Réclamation', promo_agent: 'Agent promo' }
-  const STATUS_COLORS: Record<string, string> = {
-    pending: 'bg-amber-100 text-amber-700', processing: 'bg-blue-100 text-blue-700',
-    completed: 'bg-emerald-100 text-emerald-700', cancelled: 'bg-slate-100 text-slate-600',
-    active: 'bg-emerald-100 text-emerald-700', suspended: 'bg-red-100 text-red-700',
-    open: 'bg-orange-100 text-orange-700', resolved: 'bg-emerald-100 text-emerald-700',
+  const PERMISSIONS_CABINES_EN_LIGNE: Permission[] = [
+    'canManageCabins', 'canAssignOrders', 'canAccessUv', 'canManageSubscriptions', 'canAccessComplaints', 'canMessageCabins',
+  ]
+  const peutVoirCabinesEnLigne = $derived(PERMISSIONS_CABINES_EN_LIGNE.some((p) => auth.peut(p)))
+  const peutVoirCommandes = $derived(auth.peut('canViewOrders'))
+  const peutGererCabines = $derived(auth.peut('canManageCabins'))
+
+  function classeStatut(statut: string) {
+    return configStatuts[statut]?.classe ?? 'bg-slate-100 text-slate-600 border-slate-200'
+  }
+  const TYPE_URL_LISTE: Record<string, string> = { complaint: '/admin/reclamations', promo_agent: '/admin/agents-promo' }
+  const CODES_SOUS_TITRE: Record<string, string> = {
+    basic: 'Basique', standard: 'Standard', premium: 'Premium',
+    in_verification: 'En vérification', resolved: 'Résolue',
+  }
+
+  function lienResultat(r: any) {
+    return TYPE_URL_LISTE[r.type] ?? r.url ?? '#'
+  }
+
+  function sousTitre(r: any) {
+    if (!r.subtitle) return TYPE_LABEL[r.type]
+    return String(r.subtitle)
+      .split(' · ')
+      .map((morceau: string) => {
+        const code = morceau.trim()
+        if (CODES_SOUS_TITRE[code]) return CODES_SOUS_TITRE[code]
+        if (code === 'mtn' || code === 'orange') return code.toUpperCase()
+        if (/^[a-z]+(_[a-z]+)*$/.test(code)) return libelleStatut(code, $t)
+        return morceau
+      })
+      .join(' · ')
   }
 
   function rechercheFiltered() {
@@ -65,17 +95,23 @@
       ['/admin/commandes',       'admin.nav.orders'],
       ['/admin/cabines',         'admin.nav.cabins'],
       ['/admin/abonnements',     'admin.nav.subscriptions'],
-      ['/admin/uv',              'admin.nav.uv'],
+      ['/admin/uv',              'UV'],
       ['/admin/reclamations',    'admin.nav.complaints'],
       ['/admin/agents-promo',    'admin.nav.promo_agents'],
       ['/admin/messagerie',      'admin.nav.messaging'],
+      ['/admin/support',         'Support'],
+      ['/admin/call-center',     'admin.nav.call_center'],
       ['/admin/notifications',   'admin.nav.notifications'],
-      ['/admin/fraude',          'admin.nav.fraud'],
+      ['/admin/taches',          'admin.nav.tasks'],
+      ['/admin/fraude',          'Fraude'],
       ['/admin/rapports',        'admin.nav.reports'],
       ['/admin/salaires',        'admin.nav.salaries'],
+      ['/admin/remunerations',   'Rémunérations'],
+      ['/admin/equipe',          'admin.nav.team'],
       ['/admin/parametres',      'admin.nav.settings'],
       ['/admin/profil',          'admin.nav.profile'],
-      ['/admin/packages',        'admin.nav.packages'],
+      ['/admin/packages',        'Forfaits'],
+      ['/admin/finance',         'Réconciliation'],
     ]
     for (const [prefix, cle] of carte) {
       if (chemin === prefix || chemin.startsWith(prefix + '/')) return cle
@@ -86,7 +122,15 @@
   onMount(() => {
     modeSombre = document.documentElement.classList.contains('dark')
     chargerNotifications()
-    chargerCabinesEnLigne()
+  })
+
+  $effect(() => {
+    if (!peutVoirCabinesEnLigne) {
+      cabinesEnLigne = []
+      commandesEnAttente = 0
+      return
+    }
+    untrack(() => chargerCabinesEnLigne())
     // Rafraîchir toutes les 30s pour rester synchronisé avec le scheduler
     cabinesRefreshTimer = setInterval(chargerCabinesEnLigne, 30_000)
     return () => { if (cabinesRefreshTimer) clearInterval(cabinesRefreshTimer) }
@@ -108,10 +152,12 @@
 
   async function chargerNotifications() {
     try {
-      const res = await api.get('/admin/notifications?per_page=8')
-      const data = res.data?.data
-      notifications = data?.data ?? []
-      nbNonLues = notifications.filter((n: any) => !n.isRead && !n.is_read).length
+      const [liste, compteur] = await Promise.all([
+        api.get('/admin/notifications', { params: { per_page: 8 } }),
+        api.get('/admin/notifications/count'),
+      ])
+      notifications = Array.isArray(liste.data?.data) ? liste.data.data : []
+      nbNonLues = Number(compteur.data?.data?.count ?? notifications.filter((n: any) => n.isNew).length)
     } catch {}
   }
 
@@ -124,7 +170,7 @@
   async function marquerToutLu() {
     try {
       await api.patch('/admin/notifications/read-all')
-      notifications = notifications.map(n => ({ ...n, isRead: true }))
+      notifications = notifications.map(n => ({ ...n, isNew: false }))
       nbNonLues = 0
     } catch {}
   }
@@ -146,15 +192,17 @@
     rechercheQuery = val
     afficherRecherche = rechercheQuery.length > 0
     filtreType = 'all'
+    rechercheErreur = false
     if (rechercheTimer) clearTimeout(rechercheTimer)
     if (rechercheQuery.trim().length < 2) { rechercheResults = []; return }
     rechercheTimer = setTimeout(async () => {
       rechercheLoading = true
       try {
         const res = await api.get('/admin/search', { params: { q: rechercheQuery, per_page: 30 } })
-        rechercheResults = res.data?.data ?? []
+        rechercheResults = Array.isArray(res.data?.data) ? res.data.data : []
       } catch {
         rechercheResults = []
+        rechercheErreur = true
       } finally {
         rechercheLoading = false
       }
@@ -219,6 +267,13 @@
               {/each}
             </div>
 
+          {:else if rechercheErreur}
+            <div class="py-10 text-center px-6">
+              <span class="material-symbols-outlined text-red-300" style="font-size:32px">error</span>
+              <p class="text-sm text-slate-500 mt-2">La recherche est momentanément indisponible.</p>
+              <p class="text-xs text-slate-400 mt-1">Utilisez les filtres des pages Commandes ou Cabines en attendant.</p>
+            </div>
+
           {:else if rechercheResults.length === 0}
             <div class="py-10 text-center">
               <span class="material-symbols-outlined text-slate-300" style="font-size:32px">search_off</span>
@@ -247,7 +302,7 @@
             <!-- Résultats -->
             <div class="max-h-80 overflow-y-auto divide-y divide-slate-50">
               {#each rechercheFiltered() as r}
-                <a href={r.url ?? '#'} onclick={fermerRecherche}
+                <a href={lienResultat(r)} onclick={fermerRecherche}
                   class="flex items-center gap-3 px-4 py-3 hover:bg-orange-50 transition-colors group">
                   <div class="w-8 h-8 rounded-lg {TYPE_BG[r.type]} flex items-center justify-center shrink-0">
                     <span class="material-symbols-outlined icon-filled {TYPE_TEXT[r.type]}" style="font-size:15px">
@@ -258,11 +313,11 @@
                     <p class="text-sm font-semibold text-slate-800 truncate group-hover:text-orange-600 transition-colors">
                       {r.title}
                     </p>
-                    <p class="text-xs text-slate-400 truncate">{r.subtitle ?? TYPE_LABEL[r.type]}</p>
+                    <p class="text-xs text-slate-400 truncate">{sousTitre(r)}</p>
                   </div>
                   {#if r.status}
-                    <span class="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 {STATUS_COLORS[r.status] ?? 'bg-slate-100 text-slate-600'}">
-                      {r.status}
+                    <span class="text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 {classeStatut(r.status)}">
+                      {libelleStatut(r.status, $t)}
                     </span>
                   {/if}
                   <span class="material-symbols-outlined text-slate-300 group-hover:text-orange-400 shrink-0" style="font-size:16px">chevron_right</span>
@@ -307,6 +362,7 @@
     </button>
 
     <!-- Cabines connectées -->
+    {#if peutVoirCabinesEnLigne}
     <div class="relative">
       <button
         onclick={() => { afficherCabines = !afficherCabines; afficherNotifs = false; if (afficherCabines) chargerCabinesEnLigne() }}
@@ -377,9 +433,11 @@
             {:else}
               {#each cabinesEnLigne as cabin}
                 {@const slotPct = Math.round((cabin.dailyOrdersCount / Math.max(1, cabin.maxDailyOrders)) * 100)}
-                <a
-                  href="/admin/commandes?cabin={cabin.id}"
+                <svelte:element
+                  this={peutVoirCommandes ? 'a' : 'div'}
+                  href={peutVoirCommandes ? `/admin/commandes?cabin=${cabin.id}` : undefined}
                   onclick={() => afficherCabines = false}
+                  role={peutVoirCommandes ? undefined : 'presentation'}
                   class="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 transition-colors group"
                 >
                   <!-- Avatar cabine -->
@@ -426,21 +484,25 @@
                       Libre
                     </span>
                   {/if}
-                </a>
+                </svelte:element>
               {/each}
             {/if}
           </div>
 
           <!-- Footer -->
           <div class="px-4 py-2.5 border-t border-slate-100 flex items-center justify-between">
-            <a
-              href="/admin/cabines"
-              onclick={() => afficherCabines = false}
-              class="text-xs text-slate-500 hover:text-slate-700 font-medium"
-            >
-              Toutes les cabines
-            </a>
-            {#if commandesEnAttente > 0}
+            {#if peutGererCabines}
+              <a
+                href="/admin/cabines"
+                onclick={() => afficherCabines = false}
+                class="text-xs text-slate-500 hover:text-slate-700 font-medium"
+              >
+                Toutes les cabines
+              </a>
+            {:else}
+              <span></span>
+            {/if}
+            {#if commandesEnAttente > 0 && peutVoirCommandes}
               <a
                 href="/admin/commandes?status=pending_admin_review"
                 onclick={() => afficherCabines = false}
@@ -454,6 +516,7 @@
         </div>
       {/if}
     </div>
+    {/if}
 
     <!-- Notifications -->
     <div class="relative">
@@ -494,7 +557,7 @@
               </div>
             {:else}
               {#each notifications as notif}
-                <div class="px-4 py-3 border-b border-slate-50 last:border-0 {!notif.isRead && !notif.is_read ? 'bg-orange-50/60' : ''}">
+                <div class="px-4 py-3 border-b border-slate-50 last:border-0 {notif.isNew ? 'bg-orange-50/60' : ''}">
                   <div class="flex items-start gap-2.5">
                     <div class="w-7 h-7 rounded-lg bg-orange-100 flex items-center justify-center shrink-0 mt-0.5">
                       <span class="material-symbols-outlined text-orange-500 icon-filled" style="font-size: 13px;">notifications</span>
@@ -504,10 +567,10 @@
                         {notif.message ?? notif.title ?? 'Nouvelle notification'}
                       </p>
                       <p class="text-xs text-slate-400 mt-1">
-                        {new Date(notif.createdAt ?? notif.created_at).toLocaleDateString('fr-CM')}
+                        {new Date(notif.createdAt).toLocaleDateString('fr-CM')}
                       </p>
                     </div>
-                    {#if !notif.isRead && !notif.is_read}
+                    {#if notif.isNew}
                       <div class="w-1.5 h-1.5 rounded-full bg-orange-500 shrink-0 mt-1.5"></div>
                     {/if}
                   </div>

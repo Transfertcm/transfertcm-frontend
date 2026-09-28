@@ -1,11 +1,17 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte'
+  import { onMount, onDestroy, tick } from 'svelte'
   import { auth } from '$lib/stores/auth.svelte'
   import api from '$lib/api'
   import { toast } from '$lib/stores/toast.svelte'
+  import Modal from '$lib/components/ui/Modal.svelte'
 
   type Onglet = 'cabines' | 'admins' | 'groupe'
-  let onglet = $state<Onglet>('cabines')
+  const peutCabines = $derived(auth.peut('canMessageCabins'))
+  let onglet = $state<Onglet>(auth.peut('canMessageCabins') ? 'cabines' : 'admins')
+  const onglets = $derived(
+    ([['cabines', 'store', 'Cabines'], ['admins', 'admin_panel_settings', 'Admins'], ['groupe', 'groups', 'Groupe']] as const)
+      .filter(([val]) => val !== 'cabines' || peutCabines)
+  )
 
   // Conversations cabines
   let convCabines = $state<any[]>([])
@@ -23,7 +29,28 @@
   let contenueGroupe = $state('')
   let envoiGroupe = $state(false)
 
+  let afficherNouvelle = $state(false)
+  let annuaire = $state<any[]>([])
+  let chargementAnnuaire = $state(false)
+  let demarrage = $state('')
+
   let zoneMessages = $state<HTMLDivElement | undefined>(undefined)
+  let intervalle: ReturnType<typeof setInterval> | undefined
+
+  function estMonId(id: unknown) {
+    return id != null && String(id) === String(auth.user?.id ?? '')
+  }
+
+  function nomConversation(conv: any) {
+    if (onglet === 'cabines') return conv.cabinName ?? `Conv. #${String(conv.id ?? '').slice(-6)}`
+    const autre = conv.otherParticipantName ?? (estMonId(conv.user1Id) ? conv.user2Name : conv.user1Name)
+    return autre ?? `Conv. #${String(conv.id ?? '').slice(-6)}`
+  }
+
+  function listeDepuis(res: any) {
+    const d = res.data?.data
+    return Array.isArray(d) ? d : []
+  }
 
   function formaterHeure(d: string | null) {
     if (!d) return ''
@@ -40,8 +67,7 @@
     chargement = true
     try {
       const res = await api.get('/admin/messaging/cabin-conversations')
-      const d = res.data?.data
-      convCabines = d?.data ?? d ?? []
+      convCabines = listeDepuis(res)
     } catch { toast.erreur('Erreur', 'Impossible de charger les conversations') }
     finally { chargement = false }
   }
@@ -50,19 +76,44 @@
     chargement = true
     try {
       const res = await api.get('/admin/messaging/conversations')
-      convAdmins = res.data?.data ?? []
+      convAdmins = listeDepuis(res)
     } catch { toast.erreur('Erreur', 'Impossible de charger les conversations') }
     finally { chargement = false }
   }
 
-  async function chargerGroupe() {
-    chargement = true
+  async function chargerGroupe(silencieux = false) {
+    if (!silencieux) chargement = true
     try {
       const res = await api.get('/admin/messaging/group')
-      const d = res.data?.data
-      messagesGroupe = (d?.data ?? d ?? []).reverse()
-    } catch { toast.erreur('Erreur', 'Impossible de charger le groupe') }
-    finally { chargement = false }
+      messagesGroupe = listeDepuis(res).reverse()
+    } catch { if (!silencieux) toast.erreur('Erreur', 'Impossible de charger le groupe') }
+    finally { if (!silencieux) chargement = false }
+  }
+
+  function endpointMessages(conv: any) {
+    return onglet === 'cabines'
+      ? `/admin/messaging/cabin-conversations/${conv.id}/messages`
+      : `/admin/messaging/conversations/${conv.id}/messages`
+  }
+
+  async function rafraichirMessages() {
+    if (onglet === 'groupe') {
+      if (!envoiGroupe) await chargerGroupe(true)
+      return
+    }
+    const conv = convActive
+    if (!conv || chargementMessages || envoi) return
+    try {
+      const res = await api.get(endpointMessages(conv))
+      if (convActive?.id !== conv.id) return
+      const nouveaux = listeDepuis(res)
+      const avaitNouveaux = nouveaux.length !== messages.length
+      messages = nouveaux
+      if (avaitNouveaux) {
+        await tick()
+        zoneMessages?.scrollTo({ top: zoneMessages.scrollHeight, behavior: 'smooth' })
+      }
+    } catch {}
   }
 
   async function ouvrirConversation(conv: any) {
@@ -70,12 +121,9 @@
     chargementMessages = true
     messages = []
     try {
-      const endpoint = onglet === 'cabines'
-        ? `/admin/messaging/cabin-conversations/${conv.id}/messages`
-        : `/admin/messaging/conversations/${conv.id}/messages`
-      const res = await api.get(endpoint)
-      const d = res.data?.data
-      messages = d?.data ?? d ?? []
+      const res = await api.get(endpointMessages(conv))
+      messages = listeDepuis(res)
+      if (onglet === 'cabines') convCabines = convCabines.map(c => c.id === conv.id ? { ...c, unreadCountAdmin: 0 } : c)
       await tick()
       zoneMessages?.scrollTo({ top: zoneMessages.scrollHeight, behavior: 'smooth' })
     } catch { toast.erreur('Erreur', 'Impossible de charger les messages') }
@@ -86,16 +134,15 @@
     if (!contenu.trim() || !convActive) return
     envoi = true
     try {
-      const endpoint = onglet === 'cabines'
-        ? `/admin/messaging/cabin-conversations/${convActive.id}/messages`
-        : `/admin/messaging/conversations/${convActive.id}/messages`
-      const res = await api.post(endpoint, { content: contenu })
-      messages = [...messages, res.data?.data]
+      const res = await api.post(endpointMessages(convActive), { content: contenu })
+      const envoye = res.data?.data
       contenu = ''
+      if (envoye?.id) messages = [...messages, envoye]
+      else await rafraichirMessages()
       await tick()
       zoneMessages?.scrollTo({ top: zoneMessages.scrollHeight, behavior: 'smooth' })
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible d\'envoyer')
+      toast.erreur('Erreur', e.response?.data?.errors?.[0]?.message ?? e.response?.data?.message ?? 'Impossible d\'envoyer')
     } finally { envoi = false }
   }
 
@@ -104,13 +151,49 @@
     envoiGroupe = true
     try {
       const res = await api.post('/admin/messaging/group', { content: contenueGroupe })
-      messagesGroupe = [...messagesGroupe, res.data?.data]
+      const envoye = res.data?.data
       contenueGroupe = ''
+      if (envoye?.id) messagesGroupe = [...messagesGroupe, envoye]
+      else await chargerGroupe(true)
       await tick()
       zoneMessages?.scrollTo({ top: zoneMessages.scrollHeight, behavior: 'smooth' })
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible d\'envoyer')
+      toast.erreur('Erreur', e.response?.data?.errors?.[0]?.message ?? e.response?.data?.message ?? 'Impossible d\'envoyer')
     } finally { envoiGroupe = false }
+  }
+
+  const libellesRoles: Record<string, string> = {
+    super_admin: 'Super admin',
+    admin: 'Admin',
+    service_client: 'Service client',
+    chef_agents_promo: 'Chef agents promo',
+    controleur_cabine: 'Contrôleur cabine',
+  }
+
+  async function ouvrirNouvelle() {
+    afficherNouvelle = true
+    if (annuaire.length) return
+    chargementAnnuaire = true
+    try {
+      const res = await api.get('/admin/directory')
+      annuaire = listeDepuis(res).filter((a: any) => !estMonId(a.id))
+    } catch { toast.erreur('Erreur', 'Impossible de charger la liste des admins') }
+    finally { chargementAnnuaire = false }
+  }
+
+  async function demarrerConversation(admin: any) {
+    demarrage = admin.id
+    try {
+      const res = await api.post('/admin/messaging/conversations', { userId: admin.id })
+      const conv = res.data?.data
+      if (!conv?.id) return
+      const existante = convAdmins.find((c) => c.id === conv.id)
+      if (!existante) convAdmins = [conv, ...convAdmins]
+      afficherNouvelle = false
+      await ouvrirConversation(existante ?? conv)
+    } catch (e: any) {
+      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de démarrer la conversation')
+    } finally { demarrage = '' }
   }
 
   function surChangementOnglet(o: Onglet) {
@@ -120,24 +203,32 @@
   }
 
   $effect(() => {
+    if (onglet === 'cabines' && !peutCabines) {
+      onglet = 'admins'
+      return
+    }
     if (onglet === 'cabines') chargerConvCabines()
     else if (onglet === 'admins') chargerConvAdmins()
     else chargerGroupe()
   })
 
-  onMount(chargerConvCabines)
+  onMount(() => {
+    intervalle = setInterval(rafraichirMessages, 20000)
+  })
+
+  onDestroy(() => clearInterval(intervalle))
 </script>
 
 <svelte:head><title>Messagerie — TransfertCM Admin</title></svelte:head>
 
 <div class="mb-6">
   <h2 class="font-black text-2xl text-slate-900" style="letter-spacing:-0.02em">Messagerie</h2>
-  <p class="text-sm text-slate-500 mt-0.5">Communication interne et avec les cabines</p>
+  <p class="text-sm text-slate-500 mt-0.5">{peutCabines ? 'Communication interne et avec les cabines' : 'Communication interne'}</p>
 </div>
 
 <!-- Onglets -->
 <div class="flex gap-1 bg-slate-100 rounded-xl p-1 mb-5 w-fit">
-  {#each [['cabines', 'store', 'Cabines'], ['admins', 'admin_panel_settings', 'Admins'], ['groupe', 'groups', 'Groupe']] as [val, icone, label]}
+  {#each onglets as [val, icone, label]}
     <button onclick={() => surChangementOnglet(val as Onglet)}
       class="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold transition-all
         {onglet === val ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}">
@@ -153,10 +244,17 @@
 
     <!-- Liste conversations -->
     <div class="w-72 shrink-0 border-r border-slate-100 flex flex-col {convActive ? 'hidden lg:flex' : 'flex'}">
-      <div class="px-4 py-3 border-b border-slate-100">
+      <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-2">
         <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide">
           {onglet === 'cabines' ? 'Conversations cabines' : onglet === 'admins' ? 'Conversations admins' : 'Canal groupe'}
         </p>
+        {#if onglet === 'admins'}
+          <button onclick={ouvrirNouvelle} title="Nouvelle conversation" aria-label="Nouvelle conversation"
+            class="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold text-orange-600 hover:bg-orange-50 whitespace-nowrap shrink-0">
+            <span class="material-symbols-outlined" style="font-size:16px">add</span>
+            Nouvelle
+          </button>
+        {/if}
       </div>
 
       {#if onglet === 'groupe'}
@@ -195,17 +293,17 @@
                   </div>
                   <div class="flex-1 min-w-0">
                     <p class="text-sm font-semibold text-slate-800 truncate">
-                      {conv.cabin_name ?? conv.name ?? `Conv. #${conv.id?.slice(-6)}`}
+                      {nomConversation(conv)}
                     </p>
-                    {#if conv.last_message_preview}
-                      <p class="text-xs text-slate-400 truncate">{conv.last_message_preview}</p>
+                    {#if conv.lastMessagePreview}
+                      <p class="text-xs text-slate-400 truncate">{conv.lastMessagePreview}</p>
                     {/if}
                   </div>
                   <div class="shrink-0 text-right">
-                    <p class="text-xs text-slate-400">{formaterHeure(conv.last_message_at)}</p>
-                    {#if (conv.unread_count_admin ?? 0) > 0}
+                    <p class="text-xs text-slate-400">{formaterHeure(conv.lastMessageAt)}</p>
+                    {#if (conv.unreadCountAdmin ?? 0) > 0}
                       <span class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-orange-500 text-white text-[9px] font-bold mt-1">
-                        {conv.unread_count_admin}
+                        {conv.unreadCountAdmin}
                       </span>
                     {/if}
                   </div>
@@ -236,15 +334,15 @@
             </div>
           {:else}
             {#each messagesGroupe as msg}
-              {@const estMoi = msg.sender_id === auth.user?.id}
+              {@const estMoi = estMonId(msg.senderId)}
               <div class="flex {estMoi ? 'justify-end' : 'justify-start'}">
                 <div class="max-w-xs lg:max-w-md px-4 py-2.5 rounded-2xl text-sm
                   {estMoi ? 'bg-orange-500 text-white rounded-br-sm' : 'bg-slate-100 text-slate-800 rounded-bl-sm'}">
                   {#if !estMoi}
-                    <p class="text-xs font-semibold mb-1 {estMoi ? 'text-orange-100' : 'text-orange-600'}">{msg.sender_name ?? 'Admin'}</p>
+                    <p class="text-xs font-semibold mb-1 {estMoi ? 'text-orange-100' : 'text-orange-600'}">{msg.senderName ?? 'Admin'}</p>
                   {/if}
                   <p>{msg.content}</p>
-                  <p class="text-xs mt-1 {estMoi ? 'text-orange-100' : 'text-slate-400'} text-right">{formaterHeure(msg.created_at)}</p>
+                  <p class="text-xs mt-1 {estMoi ? 'text-orange-100' : 'text-slate-400'} text-right">{formaterHeure(msg.createdAt)}</p>
                 </div>
               </div>
             {/each}
@@ -277,7 +375,7 @@
             </span>
           </div>
           <p class="font-semibold text-slate-900 text-sm">
-            {convActive.cabin_name ?? convActive.name ?? `Conversation #${convActive.id?.slice(-6)}`}
+            {nomConversation(convActive)}
           </p>
         </div>
         <div bind:this={zoneMessages} class="flex-1 overflow-y-auto p-4 space-y-3">
@@ -289,12 +387,12 @@
             </div>
           {:else}
             {#each messages as msg}
-              {@const estAdmin = msg.sender_type === 'admin'}
+              {@const estAdmin = onglet === 'cabines' ? msg.senderType === 'admin' : estMonId(msg.senderId)}
               <div class="flex {estAdmin ? 'justify-end' : 'justify-start'}">
                 <div class="max-w-xs lg:max-w-md px-4 py-2.5 rounded-2xl text-sm
                   {estAdmin ? 'bg-orange-500 text-white rounded-br-sm' : 'bg-slate-100 text-slate-800 rounded-bl-sm'}">
                   <p>{msg.content}</p>
-                  <p class="text-xs mt-1 {estAdmin ? 'text-orange-100' : 'text-slate-400'} text-right">{formaterHeure(msg.created_at)}</p>
+                  <p class="text-xs mt-1 {estAdmin ? 'text-orange-100' : 'text-slate-400'} text-right">{formaterHeure(msg.createdAt)}</p>
                 </div>
               </div>
             {/each}
@@ -328,3 +426,31 @@
     </div>
   </div>
 </div>
+
+<Modal bind:ouvert={afficherNouvelle} titre="Nouvelle conversation" largeur="sm">
+  <div class="p-4">
+    {#if chargementAnnuaire}
+      <div class="space-y-2">{#each Array(4) as _}<div class="skeleton h-12 rounded-xl"></div>{/each}</div>
+    {:else if annuaire.length === 0}
+      <p class="py-8 text-center text-sm text-slate-400">Aucun autre admin disponible</p>
+    {:else}
+      <div class="max-h-96 overflow-y-auto divide-y divide-slate-50">
+        {#each annuaire as a}
+          <button onclick={() => demarrerConversation(a)} disabled={!!demarrage}
+            class="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-slate-50 text-left disabled:opacity-50">
+            <div class="w-9 h-9 rounded-xl bg-orange-50 flex items-center justify-center shrink-0">
+              <span class="material-symbols-outlined text-orange-500 icon-filled" style="font-size:18px">person</span>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-semibold text-slate-800 truncate">{a.fullName}</p>
+              <p class="text-xs text-slate-400">{libellesRoles[a.role] ?? 'Admin'}</p>
+            </div>
+            {#if demarrage === a.id}
+              <span class="w-4 h-4 border-2 border-orange-200 border-t-orange-500 rounded-full animate-spin"></span>
+            {/if}
+          </button>
+        {/each}
+      </div>
+    {/if}
+  </div>
+</Modal>

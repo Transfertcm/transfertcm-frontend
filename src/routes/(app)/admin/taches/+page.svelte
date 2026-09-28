@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { untrack } from 'svelte'
   import api from '$lib/api'
   import { auth } from '$lib/stores/auth.svelte'
   import { toast } from '$lib/stores/toast.svelte'
@@ -15,6 +15,7 @@
   let tacheEditee = $state<any>(null)
   let envoi = $state(false)
   let suppressionEnCours = $state('')
+  let erreurForm = $state('')
 
   // Liste des admins (super_admin uniquement)
   let admins = $state<any[]>([])
@@ -27,6 +28,7 @@
     startDate: '',
     endDate: '',
     priority: 'medium',
+    status: 'todo',
     assignedTo: '',
   })
 
@@ -35,6 +37,7 @@
     { val: 'todo', label: 'À faire' },
     { val: 'in_progress', label: 'En cours' },
     { val: 'done', label: 'Terminé' },
+    { val: 'cancelled', label: 'Annulé' },
   ]
 
   const priorites = [
@@ -42,27 +45,26 @@
     { val: 'low', label: 'Faible' },
     { val: 'medium', label: 'Moyenne' },
     { val: 'high', label: 'Haute' },
+    { val: 'urgent', label: 'Urgente' },
   ]
 
   const configStatut: Record<string, { label: string; classe: string; icone: string }> = {
     todo:        { label: 'À faire',  classe: 'bg-slate-100 text-slate-600 border-slate-200',       icone: 'radio_button_unchecked' },
     in_progress: { label: 'En cours', classe: 'bg-blue-100 text-blue-700 border-blue-200',          icone: 'pending' },
     done:        { label: 'Terminé',  classe: 'bg-emerald-100 text-emerald-700 border-emerald-200', icone: 'check_circle' },
+    cancelled:   { label: 'Annulé',   classe: 'bg-slate-100 text-slate-400 border-slate-200',       icone: 'cancel' },
   }
 
   const configPriorite: Record<string, { label: string; classe: string }> = {
     low:    { label: 'Faible',  classe: 'bg-slate-100 text-slate-500' },
     medium: { label: 'Moyenne', classe: 'bg-amber-100 text-amber-700' },
     high:   { label: 'Haute',   classe: 'bg-red-100 text-red-700' },
+    urgent: { label: 'Urgente', classe: 'bg-red-600 text-white' },
   }
 
   function formaterDate(d: string | null) {
     if (!d) return '—'
     return new Date(d).toLocaleDateString('fr-CM', { day: 'numeric', month: 'short', year: 'numeric' })
-  }
-
-  function nomAssigne(t: any): string {
-    return t.assigned_to_name || t.assigned_to_email || '—'
   }
 
   async function charger() {
@@ -72,9 +74,8 @@
       if (filtreStatut) params.status = filtreStatut
       if (filtrePriorite) params.priority = filtrePriorite
       const res = await api.get('/admin/tasks', { params })
-      const d = res.data?.data
-      taches = d?.data ?? d ?? []
-      meta = d?.meta ?? null
+      taches = res.data?.data ?? []
+      meta = res.data?.meta ?? null
     } catch { toast.erreur('Erreur', 'Impossible de charger les tâches') }
     finally { chargement = false }
   }
@@ -83,18 +84,20 @@
     if (!isSuperAdmin) return
     try {
       const res = await api.get('/admin/team')
-      admins = res.data?.data?.data ?? res.data?.data ?? []
+      admins = (res.data?.data ?? []).filter((a: any) => a.role !== 'cabin')
     } catch {}
   }
 
   function ouvrirCreation() {
     tacheEditee = null
+    erreurForm = ''
     form = {
       title: '',
       description: '',
       startDate: '',
       endDate: '',
       priority: 'medium',
+      status: 'todo',
       assignedTo: isSuperAdmin ? (auth.user?.id ?? '') : '',
     }
     afficherForm = true
@@ -102,28 +105,40 @@
 
   function ouvrirEdition(t: any) {
     tacheEditee = t
+    erreurForm = ''
     form = {
       title: t.title ?? '',
       description: t.description ?? '',
-      startDate: t.start_date?.slice(0, 10) ?? '',
-      endDate: t.end_date?.slice(0, 10) ?? '',
+      startDate: t.startDate?.slice(0, 10) ?? '',
+      endDate: t.endDate?.slice(0, 10) ?? '',
       priority: t.priority ?? 'medium',
-      assignedTo: t.assigned_to ?? '',
+      status: t.status ?? 'todo',
+      assignedTo: t.assignedTo ?? '',
     }
     afficherForm = true
   }
 
   async function sauvegarder(e: Event) {
     e.preventDefault()
+    erreurForm = ''
+    if (!form.startDate || !form.endDate) {
+      erreurForm = 'Les dates de début et d\'échéance sont obligatoires.'
+      return
+    }
+    if (form.endDate < form.startDate) {
+      erreurForm = 'L\'échéance doit être postérieure ou égale à la date de début.'
+      return
+    }
     envoi = true
     try {
       const payload: any = {
         title: form.title,
-        description: form.description,
-        startDate: form.startDate || null,
-        endDate: form.endDate || null,
+        startDate: form.startDate,
+        endDate: form.endDate,
         priority: form.priority,
       }
+      if (form.description.trim()) payload.description = form.description.trim()
+      if (tacheEditee) payload.status = form.status
       if (isSuperAdmin) payload.assignedTo = form.assignedTo
 
       if (tacheEditee) {
@@ -136,7 +151,12 @@
       afficherForm = false
       await charger()
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de sauvegarder')
+      const erreurs422 = e.response?.data?.errors
+      if (e.response?.status === 422 && Array.isArray(erreurs422) && erreurs422.length) {
+        erreurForm = erreurs422.map((x: any) => x.message).join(' ')
+      } else {
+        if (!e.toastAffiche) toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de sauvegarder')
+      }
     } finally { envoi = false }
   }
 
@@ -145,7 +165,7 @@
       await api.put(`/admin/tasks/${id}`, { status })
       taches = taches.map(t => t.id === id ? { ...t, status } : t)
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de mettre à jour')
+      if (!e.toastAffiche) toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de mettre à jour')
     }
   }
 
@@ -156,12 +176,12 @@
       toast.succes('Tâche supprimée')
       taches = taches.filter(t => t.id !== id)
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de supprimer')
+      if (!e.toastAffiche) toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de supprimer')
     } finally { suppressionEnCours = '' }
   }
 
   $effect(() => { filtreStatut; filtrePriorite; page; charger() })
-  onMount(() => { charger(); chargerAdmins() })
+  $effect(() => { if (isSuperAdmin) untrack(chargerAdmins) })
 </script>
 
 <svelte:head><title>Tâches — TransfertCM Admin</title></svelte:head>
@@ -236,7 +256,7 @@
 
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2 flex-wrap mb-1">
-                <p class="text-sm font-bold text-slate-900 {t.status === 'done' ? 'line-through text-slate-400' : ''}">
+                <p class="text-sm font-bold text-slate-900 {t.status === 'done' || t.status === 'cancelled' ? 'line-through text-slate-400' : ''}">
                   {t.title}
                 </p>
                 <span class="text-xs font-semibold px-2 py-0.5 rounded-full border {cfgS.classe}">{cfgS.label}</span>
@@ -246,23 +266,23 @@
                 <p class="text-xs text-slate-500 line-clamp-2 mb-2">{t.description}</p>
               {/if}
               <div class="flex items-center gap-4 text-xs text-slate-400 flex-wrap">
-                {#if t.start_date}
+                {#if t.startDate}
                   <span class="flex items-center gap-1">
                     <span class="material-symbols-outlined" style="font-size:12px">calendar_today</span>
-                    {formaterDate(t.start_date)}
+                    {formaterDate(t.startDate)}
                   </span>
                 {/if}
-                {#if t.end_date}
+                {#if t.endDate}
                   <span class="flex items-center gap-1">
                     <span class="material-symbols-outlined" style="font-size:12px">event</span>
-                    Échéance : {formaterDate(t.end_date)}
+                    Échéance : {formaterDate(t.endDate)}
                   </span>
                 {/if}
                 <!-- Assigné à (visible pour super_admin) -->
-                {#if isSuperAdmin && t.assigned_to_name}
+                {#if isSuperAdmin && t.assignedToName}
                   <span class="flex items-center gap-1">
                     <span class="material-symbols-outlined" style="font-size:12px">person</span>
-                    {t.assigned_to_name}
+                    {t.assignedToName}
                   </span>
                 {/if}
               </div>
@@ -337,13 +357,13 @@
 
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label for="debut-tache" class="block text-xs font-semibold text-slate-600 mb-1.5">Date début</label>
-            <input id="debut-tache" type="date" bind:value={form.startDate}
+            <label for="debut-tache" class="block text-xs font-semibold text-slate-600 mb-1.5">Date début *</label>
+            <input id="debut-tache" type="date" bind:value={form.startDate} required
               class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
           </div>
           <div>
-            <label for="fin-tache" class="block text-xs font-semibold text-slate-600 mb-1.5">Échéance</label>
-            <input id="fin-tache" type="date" bind:value={form.endDate}
+            <label for="fin-tache" class="block text-xs font-semibold text-slate-600 mb-1.5">Échéance *</label>
+            <input id="fin-tache" type="date" bind:value={form.endDate} required min={form.startDate || undefined}
               class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
           </div>
         </div>
@@ -355,8 +375,21 @@
             <option value="low">Faible</option>
             <option value="medium">Moyenne</option>
             <option value="high">Haute</option>
+            <option value="urgent">Urgente</option>
           </select>
         </div>
+
+        {#if tacheEditee}
+          <div>
+            <label for="statut-tache" class="block text-xs font-semibold text-slate-600 mb-1.5">Statut</label>
+            <select id="statut-tache" bind:value={form.status}
+              class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
+              {#each statuts.filter(s => s.val) as s}
+                <option value={s.val}>{s.label}</option>
+              {/each}
+            </select>
+          </div>
+        {/if}
 
         <!-- Assignation : dropdown pour super_admin, affichage du nom pour les autres -->
         {#if isSuperAdmin}
@@ -382,12 +415,16 @@
           </div>
         {/if}
 
+        {#if erreurForm}
+          <p class="text-red-500 text-xs">{erreurForm}</p>
+        {/if}
+
         <div class="flex gap-3 pt-1">
           <button type="button" onclick={() => afficherForm = false}
             class="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-sm font-semibold hover:bg-slate-50">
             Annuler
           </button>
-          <button type="submit" disabled={envoi || !form.title || (isSuperAdmin && !form.assignedTo)}
+          <button type="submit" disabled={envoi || !form.title || !form.startDate || !form.endDate || (isSuperAdmin && !form.assignedTo)}
             class="flex-1 px-4 py-2.5 rounded-xl text-white text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
             style="background:linear-gradient(135deg, #007A5E 0%, #00A878 100%)">
             {#if envoi}

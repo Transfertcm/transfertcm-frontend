@@ -1,7 +1,9 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
   import api from '$lib/api'
   import { toast } from '$lib/stores/toast.svelte'
+  import { auth } from '$lib/stores/auth.svelte'
+  import Modal from '$lib/components/ui/Modal.svelte'
 
   let settings = $state<any[]>([])
   let phones = $state<any[]>([])
@@ -12,38 +14,30 @@
   type Onglet = 'frais' | 'phones' | 'villes' | 'general'
   let onglet = $state<Onglet>('frais')
 
-  // Frais de service
-  const reseaux = [
-    { key: 'mtn',     label: 'MTN Mobile Money', couleur: '#f59e0b' },
-    { key: 'orange',  label: 'Orange Money',      couleur: '#f97316' },
-    { key: 'viettel', label: 'Viettel Cash',      couleur: '#3b82f6' },
-    { key: 'wave',    label: 'Wave',              couleur: '#06b6d4' },
-  ]
-  type FraisReseau = { percent: number; fixed: number }
-  let frais = $state<Record<string, FraisReseau>>({
-    mtn:     { percent: 0, fixed: 0 },
-    orange:  { percent: 0, fixed: 0 },
-    viettel: { percent: 0, fixed: 0 },
-    wave:    { percent: 0, fixed: 0 },
-  })
-  let fraisEnEdition = $state<string | null>(null)
-  let fraisEdit = $state<FraisReseau>({ percent: 0, fixed: 0 })
+  const FRAIS_PAR_DEFAUT = 20
+  let fraisFixe = $state(FRAIS_PAR_DEFAUT)
+  let fraisConfigure = $state(false)
+  let fraisEnEdition = $state(false)
+  let fraisEdit = $state<number | string>(FRAIS_PAR_DEFAUT)
+
+  const peutAssigner = $derived(auth.peut('canViewSettings'))
+  let admins = $state<any[]>([])
+  let phoneASupprimer = $state<any>(null)
+  let confirmationPhone = $state(false)
+  let villeASupprimer = $state<any>(null)
+  let confirmationVille = $state(false)
 
   // Edition paramètre général
   let settingEnEdition = $state<any>(null)
   let nouvelleValeur = $state('')
 
-  // Plans d'abonnement parsés depuis les settings
-  const subscriptionPlans = $derived<Record<string, any> | null>(
-    (() => {
-      const row = settings.find((s: any) => s.key === 'subscription_plans')
-      if (!row?.value) return null
-      try { return JSON.parse(row.value) } catch { return null }
-    })()
-  )
-
   // Settings généraux (hors ceux gérés par les autres onglets)
   const CLES_EXCLUES = ['transaction_fees', 'subscription_plans']
+  const libellesParametres: Record<string, string> = {
+    deposit_fees: 'Frais de dépôt portefeuille (XAF)',
+    transfer_fees: 'Frais de transfert entre membres (XAF)',
+  }
+
   const settingsGeneraux = $derived(settings.filter((s: any) => !CLES_EXCLUES.includes(s.key)))
 
   // Modals
@@ -65,37 +59,47 @@
       phones = phoneRes.data?.data ?? []
       cityAssignments = villeRes.data?.data ?? []
 
-      // Charger les frais depuis les settings
       const fraisRow = settings.find((s: any) => s.key === 'transaction_fees')
-      if (fraisRow?.value) {
-        try {
-          const parsed = JSON.parse(fraisRow.value)
-          for (const k of Object.keys(frais)) {
-            if (parsed[k]) frais[k] = parsed[k]
-          }
-        } catch {}
-      }
+      const lu = fraisRow ? Number.parseInt(fraisRow.value, 10) : Number.NaN
+      fraisConfigure = Number.isFinite(lu)
+      fraisFixe = fraisConfigure ? lu : FRAIS_PAR_DEFAUT
     } catch { toast.erreur('Erreur', 'Impossible de charger les paramètres') }
     finally { chargement = false }
   }
 
-  function ouvrirEditionFrais(key: string) {
-    fraisEnEdition = key
-    fraisEdit = { ...frais[key] }
+  async function chargerAdmins() {
+    try {
+      const res = await api.get('/admin/directory')
+      admins = res.data?.data ?? []
+    } catch {}
+  }
+
+  const libellesRoles: Record<string, string> = {
+    super_admin: 'Super admin',
+    admin: 'Admin',
+    service_client: 'Service client',
+    chef_agents_promo: 'Chef agents promo',
+    controleur_cabine: 'Contrôleur cabine',
+  }
+
+  function messageErreur(e: any, defaut: string) {
+    return e.response?.data?.message ?? defaut
+  }
+
+  function ouvrirEditionFrais() {
+    fraisEnEdition = true
+    fraisEdit = fraisFixe
   }
 
   async function sauvegarderFrais() {
-    if (!fraisEnEdition) return
     actionEnCours = 'frais'
     try {
-      frais[fraisEnEdition] = { ...fraisEdit }
-      await api.put('/admin/settings/transaction_fees', {
-        value: JSON.stringify(frais),
-      })
-      toast.succes('Frais mis à jour')
-      fraisEnEdition = null
+      await api.put('/admin/settings/transaction_fees', { value: String(fraisEdit ?? '').trim() })
+      toast.succes('Frais mis à jour', 'Le nouveau montant s\'applique immédiatement aux nouvelles commandes.')
+      fraisEnEdition = false
+      await charger()
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de sauvegarder')
+      if (!e.toastAffiche) toast.erreur(e.response?.status === 422 ? 'Valeur invalide' : 'Erreur', messageErreur(e, 'Impossible de sauvegarder'))
     } finally { actionEnCours = '' }
   }
 
@@ -107,7 +111,7 @@
       settingEnEdition = null
       await charger()
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de sauvegarder')
+      if (!e.toastAffiche) toast.erreur(e.response?.status === 422 ? 'Valeur invalide' : 'Erreur', messageErreur(e, 'Impossible de sauvegarder'))
     } finally { actionEnCours = '' }
   }
 
@@ -120,8 +124,13 @@
       formPhone = { phoneNumber: '', phoneLabel: '', isPrimary: false }
       await charger()
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible d\'ajouter')
+      if (!e.toastAffiche) toast.erreur(e.response?.status === 422 ? 'Numéro invalide' : 'Erreur', messageErreur(e, 'Impossible d\'ajouter'))
     } finally { actionEnCours = '' }
+  }
+
+  function demanderSuppressionPhone(phone: any) {
+    phoneASupprimer = phone
+    confirmationPhone = true
   }
 
   async function supprimerPhone(id: string) {
@@ -129,6 +138,8 @@
     try {
       await api.delete(`/admin/settings/service-phones/${id}`)
       toast.succes('Numéro désactivé')
+      confirmationPhone = false
+      phoneASupprimer = null
       await charger()
     } catch (e: any) {
       toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de supprimer')
@@ -144,11 +155,30 @@
       formVille = { city: '', adminUserId: '' }
       await charger()
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible d\'assigner')
+      if (!e.toastAffiche) toast.erreur('Erreur', messageErreur(e, 'Impossible d\'assigner'))
+    } finally { actionEnCours = '' }
+  }
+
+  function demanderSuppressionVille(assign: any) {
+    villeASupprimer = assign
+    confirmationVille = true
+  }
+
+  async function supprimerVille(id: string) {
+    actionEnCours = id
+    try {
+      const res = await api.delete(`/admin/settings/city-assignments/${id}`)
+      toast.succes('Assignation supprimée', res.data?.data?.message)
+      confirmationVille = false
+      villeASupprimer = null
+      await charger()
+    } catch (e: any) {
+      if (!e.toastAffiche) toast.erreur('Erreur', messageErreur(e, 'Impossible de supprimer'))
     } finally { actionEnCours = '' }
   }
 
   onMount(charger)
+  $effect(() => { if (peutAssigner) untrack(chargerAdmins) })
 </script>
 
 <svelte:head><title>Paramètres — TransfertCM Admin</title></svelte:head>
@@ -160,7 +190,7 @@
 
 <!-- Onglets -->
 <div class="flex gap-1 bg-slate-100 rounded-xl p-1 mb-5 w-fit">
-  {#each [['frais','percent','Frais de service'],['phones','phone','Téléphones service'],['villes','location_city','Villes'],['general','tune','Général']] as [val, icone, label]}
+  {#each [['frais','payments','Frais de service'],['phones','phone','Téléphones service'],['villes','location_city','Villes'],['general','tune','Général']] as [val, icone, label]}
     <button onclick={() => onglet = val as Onglet}
       class="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold transition-all
         {onglet === val ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}">
@@ -173,89 +203,60 @@
 <!-- ── Frais de service ─────────────────────────────────────────────────────── -->
 {#if onglet === 'frais'}
   <div class="bg-white rounded-2xl border border-slate-100 card-shadow overflow-hidden">
-    <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-      <div>
-        <p class="font-bold text-slate-900 text-sm">Frais de transfert par réseau</p>
-        <p class="text-xs text-slate-400 mt-0.5">Montant total = montant + (montant × %) + frais fixe</p>
-      </div>
+    <div class="px-5 py-4 border-b border-slate-100">
+      <p class="font-bold text-slate-900 text-sm">Frais de service par commande</p>
+      <p class="text-xs text-slate-400 mt-0.5">Montant fixe en XAF ajouté à chaque commande (crédit, forfait, transfert), identique pour MTN et Orange.</p>
     </div>
 
     {#if chargement}
-      <div class="p-5 space-y-3">{#each Array(4) as _}<div class="skeleton h-16 rounded-xl"></div>{/each}</div>
+      <div class="p-5"><div class="skeleton h-16 rounded-xl"></div></div>
     {:else}
-      <!-- En-tête tableau -->
-      <div class="grid grid-cols-12 gap-3 px-5 py-3 bg-slate-50 border-b border-slate-100 text-xs font-semibold text-slate-400 uppercase tracking-wide">
-        <div class="col-span-4">Réseau mobile</div>
-        <div class="col-span-3 text-right">Frais (%)</div>
-        <div class="col-span-3 text-right">Frais fixe (XAF)</div>
-        <div class="col-span-2"></div>
-      </div>
-
-      <div class="divide-y divide-slate-50">
-        {#each reseaux as reseau}
-          <div class="grid grid-cols-12 gap-3 items-center px-5 py-4">
-            <!-- Réseau -->
-            <div class="col-span-4 flex items-center gap-3">
-              <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-                style="background: {reseau.couleur}20">
-                <span class="material-symbols-outlined icon-filled" style="font-size:16px; color:{reseau.couleur}">smartphone</span>
-              </div>
-              <p class="text-sm font-semibold text-slate-800">{reseau.label}</p>
+      <div class="flex items-center gap-4 px-5 py-5 flex-wrap">
+        <div class="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center shrink-0">
+          <span class="material-symbols-outlined text-orange-500 icon-filled" style="font-size:20px">payments</span>
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-xs text-slate-400">Frais fixe par commande</p>
+          {#if fraisEnEdition}
+            <div class="flex items-center gap-2 mt-1">
+              <input type="number" bind:value={fraisEdit} min="0" step="1"
+                onkeydown={(e) => e.key === 'Enter' && sauvegarderFrais()}
+                class="w-28 px-2 py-1.5 rounded-lg border border-orange-300 text-sm text-right" />
+              <span class="text-xs text-slate-400">XAF</span>
             </div>
-
-            {#if fraisEnEdition === reseau.key}
-              <!-- Mode édition -->
-              <div class="col-span-3 flex justify-end">
-                <div class="flex items-center gap-1">
-                  <input type="number" bind:value={fraisEdit.percent} min="0" max="100" step="0.1"
-                    class="w-20 px-2 py-1.5 rounded-lg border border-orange-300 text-sm text-right" />
-                  <span class="text-xs text-slate-400">%</span>
-                </div>
-              </div>
-              <div class="col-span-3 flex justify-end">
-                <div class="flex items-center gap-1">
-                  <input type="number" bind:value={fraisEdit.fixed} min="0" step="50"
-                    class="w-24 px-2 py-1.5 rounded-lg border border-orange-300 text-sm text-right" />
-                  <span class="text-xs text-slate-400">XAF</span>
-                </div>
-              </div>
-              <div class="col-span-2 flex gap-1.5 justify-end">
-                <button onclick={sauvegarderFrais} disabled={actionEnCours === 'frais'}
-                  class="px-3 py-1.5 rounded-lg bg-orange-500 text-white text-xs font-semibold hover:bg-orange-600 disabled:opacity-50">
-                  {actionEnCours === 'frais' ? '...' : 'OK'}
-                </button>
-                <button onclick={() => fraisEnEdition = null}
-                  class="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50">
-                  ✕
-                </button>
-              </div>
-            {:else}
-              <!-- Mode affichage -->
-              <div class="col-span-3 text-right">
-                <p class="text-sm font-bold text-slate-900">{frais[reseau.key]?.percent ?? 0} %</p>
-              </div>
-              <div class="col-span-3 text-right">
-                <p class="text-sm font-bold text-slate-900">{(frais[reseau.key]?.fixed ?? 0).toLocaleString('fr-CM')} XAF</p>
-              </div>
-              <div class="col-span-2 flex justify-end">
-                <button onclick={() => ouvrirEditionFrais(reseau.key)}
-                  class="w-8 h-8 rounded-lg hover:bg-orange-50 flex items-center justify-center text-slate-400 hover:text-orange-500">
-                  <span class="material-symbols-outlined" style="font-size:16px">edit</span>
-                </button>
-              </div>
+          {:else}
+            <p class="text-xl font-black text-slate-900">{fraisFixe.toLocaleString('fr-CM')} XAF</p>
+            {#if !fraisConfigure}
+              <p class="text-xs text-slate-400">Valeur par défaut du serveur (aucune valeur enregistrée)</p>
             {/if}
+          {/if}
+        </div>
+        {#if fraisEnEdition}
+          <div class="flex gap-1.5">
+            <button onclick={sauvegarderFrais} disabled={actionEnCours === 'frais'}
+              class="px-3 py-1.5 rounded-lg bg-orange-500 text-white text-xs font-semibold hover:bg-orange-600 disabled:opacity-50">
+              {actionEnCours === 'frais' ? '...' : 'Enregistrer'}
+            </button>
+            <button onclick={() => fraisEnEdition = false}
+              class="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50">
+              Annuler
+            </button>
           </div>
-        {/each}
+        {:else}
+          <button onclick={ouvrirEditionFrais}
+            class="w-8 h-8 rounded-lg hover:bg-orange-50 flex items-center justify-center text-slate-400 hover:text-orange-500">
+            <span class="material-symbols-outlined" style="font-size:16px">edit</span>
+          </button>
+        {/if}
       </div>
 
-      <!-- Exemple de calcul -->
-      <div class="px-5 py-4 border-t border-slate-100 bg-slate-50">
+      <div class="px-5 py-4 border-t border-slate-100 bg-slate-50 space-y-1">
         <p class="text-xs text-slate-500">
-          <span class="font-semibold text-slate-700">Exemple MTN :</span>
-          Pour un transfert de 10 000 XAF →
-          frais = {Math.round(10000 * (frais.mtn?.percent ?? 0) / 100 + (frais.mtn?.fixed ?? 0)).toLocaleString('fr-CM')} XAF →
-          total client = {Math.round(10000 + 10000 * (frais.mtn?.percent ?? 0) / 100 + (frais.mtn?.fixed ?? 0)).toLocaleString('fr-CM')} XAF
+          <span class="font-semibold text-slate-700">Exemple :</span>
+          pour une commande de 10 000 XAF → frais = {fraisFixe.toLocaleString('fr-CM')} XAF →
+          total payé par le client = {(10000 + fraisFixe).toLocaleString('fr-CM')} XAF
         </p>
+        <p class="text-xs text-slate-400">Une modification s'applique immédiatement aux nouvelles commandes.</p>
       </div>
     {/if}
   </div>
@@ -285,14 +286,14 @@
             </div>
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2">
-                <p class="text-sm font-bold text-slate-900 font-mono">{phone.phone_number}</p>
-                {#if phone.is_primary}
+                <p class="text-sm font-bold text-slate-900 font-mono">{phone.phoneNumber}</p>
+                {#if phone.isPrimary}
                   <span class="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 font-semibold">Principal</span>
                 {/if}
               </div>
-              <p class="text-xs text-slate-500">{phone.phone_label ?? '—'}</p>
+              <p class="text-xs text-slate-500">{phone.phoneLabel ?? '—'}</p>
             </div>
-            <button onclick={() => supprimerPhone(phone.id)} disabled={actionEnCours === phone.id}
+            <button onclick={() => demanderSuppressionPhone(phone)} disabled={actionEnCours === phone.id} title="Supprimer"
               class="w-8 h-8 rounded-lg hover:bg-red-50 flex items-center justify-center text-slate-400 hover:text-red-500 disabled:opacity-50">
               <span class="material-symbols-outlined" style="font-size:16px">delete</span>
             </button>
@@ -305,10 +306,12 @@
 <!-- ── Villes ───────────────────────────────────────────────────────────────── -->
 {:else if onglet === 'villes'}
   <div class="mb-4 flex justify-end">
-    <button onclick={() => afficherModalVille = true} class="btn-primary">
-      <span class="material-symbols-outlined icon-filled" style="font-size:16px">add</span>
-      Assigner une ville
-    </button>
+    {#if peutAssigner}
+      <button onclick={() => afficherModalVille = true} class="btn-primary">
+        <span class="material-symbols-outlined icon-filled" style="font-size:16px">add</span>
+        Assigner une ville
+      </button>
+    {/if}
   </div>
   <div class="bg-white rounded-2xl border border-slate-100 card-shadow overflow-hidden">
     {#if chargement}
@@ -316,7 +319,9 @@
     {:else if cityAssignments.length === 0}
       <div class="py-20 text-center">
         <p class="text-slate-600 font-semibold">Aucune assignation de ville</p>
-        <button onclick={() => afficherModalVille = true} class="btn-primary mt-4">Assigner la première ville</button>
+        {#if peutAssigner}
+          <button onclick={() => afficherModalVille = true} class="btn-primary mt-4">Assigner la première ville</button>
+        {/if}
       </div>
     {:else}
       <div class="divide-y divide-slate-50">
@@ -327,11 +332,17 @@
             </div>
             <div class="flex-1">
               <p class="text-sm font-bold text-slate-900">{assign.city}</p>
-              <p class="text-xs text-slate-500">Admin : {assign.admin_user_id?.slice(-8) ?? '—'}</p>
+              <p class="text-xs text-slate-500">Admin : {assign.adminName ?? '—'}</p>
             </div>
-            <span class="text-xs font-semibold px-2.5 py-1 rounded-full {assign.is_enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}">
-              {assign.is_enabled ? 'Actif' : 'Inactif'}
+            <span class="text-xs font-semibold px-2.5 py-1 rounded-full {assign.isEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}">
+              {assign.isEnabled ? 'Actif' : 'Inactif'}
             </span>
+            {#if peutAssigner}
+              <button onclick={() => demanderSuppressionVille(assign)} disabled={actionEnCours === assign.id} title="Supprimer"
+                class="w-8 h-8 rounded-lg hover:bg-red-50 flex items-center justify-center text-slate-400 hover:text-red-500 disabled:opacity-50">
+                <span class="material-symbols-outlined" style="font-size:16px">delete</span>
+              </button>
+            {/if}
           </div>
         {/each}
       </div>
@@ -346,45 +357,6 @@
     </div>
   {:else}
 
-    <!-- Plans d'abonnement -->
-    {#if subscriptionPlans}
-      <div class="bg-white rounded-2xl border border-slate-100 card-shadow overflow-hidden mb-5">
-        <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
-          <div class="w-8 h-8 rounded-lg bg-orange-50 flex items-center justify-center">
-            <span class="material-symbols-outlined text-orange-500 icon-filled" style="font-size:18px">workspace_premium</span>
-          </div>
-          <div>
-            <p class="font-bold text-slate-900 text-sm">Plans d'abonnement</p>
-            <p class="text-xs text-slate-400">Tarifs et limites de chaque plan cabine</p>
-          </div>
-        </div>
-        <div class="p-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {#each Object.entries(subscriptionPlans) as [cle, plan]}
-            {@const couleurs: Record<string, string> = { basic: 'slate', standard: 'blue', premium: 'amber' }}
-            {@const c = couleurs[cle] ?? 'slate'}
-            <div class="rounded-xl border border-slate-200 p-4">
-              <div class="flex items-center gap-2 mb-3">
-                <span class="w-2 h-2 rounded-full bg-{c}-400"></span>
-                <p class="text-xs font-bold text-slate-500 uppercase tracking-wide">{plan.name ?? cle}</p>
-              </div>
-              <p class="font-black text-2xl text-slate-900 tabular-nums">
-                {(plan.price ?? 0).toLocaleString('fr-CM')}
-                <span class="text-sm font-normal text-slate-400">XAF</span>
-              </p>
-              <p class="text-xs text-slate-400 mt-0.5">par mois</p>
-              <div class="mt-3 pt-3 border-t border-slate-100 flex items-center gap-1.5 text-xs text-slate-600">
-                <span class="material-symbols-outlined" style="font-size:14px">shopping_cart</span>
-                <span class="font-semibold">{plan.maxOrders ?? '∞'}</span> commandes max / jour
-              </div>
-            </div>
-          {/each}
-        </div>
-        <div class="px-5 py-3 border-t border-slate-100 bg-slate-50">
-          <p class="text-xs text-slate-400">Pour modifier les plans, contactez l'équipe technique (modification JSON avancée).</p>
-        </div>
-      </div>
-    {/if}
-
     <!-- Autres paramètres généraux -->
     {#if settingsGeneraux.length > 0}
       <div class="bg-white rounded-2xl border border-slate-100 card-shadow overflow-hidden">
@@ -395,7 +367,7 @@
           {#each settingsGeneraux as setting}
             <div class="flex items-center gap-4 px-5 py-4 hover:bg-slate-50 transition-all">
               <div class="flex-1 min-w-0">
-                <p class="text-xs font-bold text-slate-400 uppercase tracking-wide font-mono mb-0.5">{setting.key}</p>
+                <p class="text-xs font-bold text-slate-400 uppercase tracking-wide mb-0.5">{libellesParametres[setting.key] ?? setting.key}</p>
                 {#if settingEnEdition?.key === setting.key}
                   <div class="flex gap-2 mt-2">
                     <input type="text" bind:value={nouvelleValeur}
@@ -424,7 +396,7 @@
           {/each}
         </div>
       </div>
-    {:else if !subscriptionPlans}
+    {:else}
       <div class="bg-white rounded-2xl border border-slate-100 card-shadow py-20 text-center">
         <p class="text-slate-600 font-semibold">Aucun paramètre général configuré</p>
       </div>
@@ -484,8 +456,13 @@
           <input id="vl-city" type="text" bind:value={formVille.city} placeholder="Douala, Yaoundé, Bafoussam..." class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
         </div>
         <div>
-          <label for="vl-admin" class="block text-xs font-semibold text-slate-600 mb-1.5">ID Admin responsable *</label>
-          <input id="vl-admin" type="text" bind:value={formVille.adminUserId} placeholder="ID de l'admin" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
+          <label for="vl-admin" class="block text-xs font-semibold text-slate-600 mb-1.5">Admin responsable *</label>
+          <select id="vl-admin" bind:value={formVille.adminUserId} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
+            <option value="">— Choisir un admin —</option>
+            {#each admins as a}
+              <option value={a.id}>{a.fullName} · {libellesRoles[a.role] ?? 'Admin'}</option>
+            {/each}
+          </select>
         </div>
         <div class="flex gap-3">
           <button onclick={() => afficherModalVille = false} class="btn-secondary flex-1">Annuler</button>
@@ -498,3 +475,33 @@
     </div>
   </div>
 {/if}
+
+<Modal bind:ouvert={confirmationPhone} titre="Supprimer ce numéro ?" largeur="sm">
+  <div class="p-6 space-y-4">
+    <p class="text-sm text-slate-600">
+      Le numéro <span class="font-mono font-semibold">{phoneASupprimer?.phoneNumber}</span> ne sera plus proposé comme numéro du service client.
+    </p>
+    <div class="flex gap-3">
+      <button onclick={() => confirmationPhone = false} class="btn-secondary flex-1">Annuler</button>
+      <button onclick={() => phoneASupprimer && supprimerPhone(phoneASupprimer.id)} disabled={!phoneASupprimer || actionEnCours === phoneASupprimer?.id}
+        class="flex-1 px-4 py-2.5 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 disabled:opacity-50">
+        {actionEnCours === phoneASupprimer?.id ? '...' : 'Supprimer'}
+      </button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:ouvert={confirmationVille} titre="Supprimer cette assignation ?" largeur="sm">
+  <div class="p-6 space-y-4">
+    <p class="text-sm text-slate-600">
+      <span class="font-semibold">{villeASupprimer?.city}</span> n'aura plus d'admin responsable ({villeASupprimer?.adminName ?? '—'}).
+    </p>
+    <div class="flex gap-3">
+      <button onclick={() => confirmationVille = false} class="btn-secondary flex-1">Annuler</button>
+      <button onclick={() => villeASupprimer && supprimerVille(villeASupprimer.id)} disabled={!villeASupprimer || actionEnCours === villeASupprimer?.id}
+        class="flex-1 px-4 py-2.5 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 disabled:opacity-50">
+        {actionEnCours === villeASupprimer?.id ? '...' : 'Supprimer'}
+      </button>
+    </div>
+  </div>
+</Modal>

@@ -15,9 +15,78 @@
   let afficherMdpActuel = $state(false)
   let afficherNouveauMdp = $state(false)
 
+  let erreurProfil = $state('')
+
+  const libellesRoles: Record<string, string> = {
+    super_admin: 'Super Admin', admin: 'Admin', service_client: 'Service client',
+    chef_agents_promo: 'Chef agents promo', controleur_cabine: 'Contrôleur cabine',
+  }
+
+  const libellesPermissions: Record<string, string> = {
+    canViewOrders: 'Voir et créer les commandes',
+    canAssignOrders: 'Attribuer les commandes aux cabines',
+    canValidatePayments: 'Valider un paiement manuellement',
+    canRefundOrders: 'Rembourser une commande',
+    canManageCabins: 'Gérer les cabines',
+    canManageSubscriptions: 'Gérer les abonnements, factures et rémunérations des cabines',
+    canAccessUv: 'Gérer les UV',
+    canAccessFraud: 'Gérer l\'anti-fraude',
+    canViewPromoAgents: 'Gérer les agents promo',
+    canAccessComplaints: 'Traiter les réclamations et le support client',
+    canAccessCallCenter: 'Accéder au call center',
+    canMessageCabins: 'Échanger avec les cabines',
+    canViewReports: 'Gérer les tâches, rapports et budgets',
+    canValidateReports: 'Valider les rapports et approuver les budgets',
+    canViewSettings: 'Modifier les paramètres, frais et forfaits',
+    canViewSalaries: 'Gérer les salaires de toute l\'équipe',
+  }
+
+  let sessions = $state<any[]>([])
+  let chargementSessions = $state(false)
+  let sessionEnCours = $state('')
+  let confirmationAutres = $state(false)
+
+  const permissionsAffichees = $derived(
+    profil?.permissions
+      ? Object.entries(profil.permissions).filter(([k]) => k in libellesPermissions)
+      : []
+  )
+
   function formaterDate(d: string | null) {
     if (!d) return '—'
     return new Date(d).toLocaleDateString('fr-CM', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  }
+
+  function messageErreur(e: any, defaut: string) {
+    return e.response?.data?.message ?? defaut
+  }
+
+  function decrireAppareil(ua: string | null) {
+    if (!ua) return 'Appareil inconnu'
+    const navigateur =
+      /Edg\//.test(ua) ? 'Edge'
+      : /OPR\/|Opera/.test(ua) ? 'Opera'
+      : /Firefox\//.test(ua) ? 'Firefox'
+      : /HeadlessChrome/.test(ua) ? 'Chrome (automatisé)'
+      : /Chrome\/|CriOS/.test(ua) ? 'Chrome'
+      : /Safari\//.test(ua) ? 'Safari'
+      : null
+    const systeme =
+      /iPhone/.test(ua) ? 'iPhone'
+      : /iPad/.test(ua) ? 'iPad'
+      : /Android/.test(ua) ? 'Android'
+      : /Windows/.test(ua) ? 'Windows'
+      : /Mac OS X|Macintosh/.test(ua) ? 'macOS'
+      : /Linux/.test(ua) ? 'Linux'
+      : null
+    if (navigateur) return systeme ? `${navigateur} sur ${systeme}` : navigateur
+    if (systeme) return systeme
+    const outil = ua.split(/[\s/]/)[0]
+    return outil ? `Application « ${outil} »` : 'Appareil inconnu'
+  }
+
+  function estMobile(ua: string | null) {
+    return /iPhone|iPad|Android/.test(ua ?? '')
   }
 
   function initiales(nom: string | null) {
@@ -30,6 +99,7 @@
     try {
       const res = await api.get('/account/profile')
       profil = res.data?.data ?? null
+      sessions = profil?.activeSessions ?? []
       if (profil?.profile) {
         formProfil = {
           firstName: profil.profile.firstName ?? '',
@@ -40,18 +110,63 @@
       }
     } catch { toast.erreur('Erreur', 'Impossible de charger le profil') }
     finally { chargement = false }
+    chargerSessions()
+  }
+
+  async function chargerSessions() {
+    chargementSessions = true
+    try {
+      const res = await api.get('/account/sessions')
+      sessions = res.data?.data ?? []
+    } catch {}
+    finally { chargementSessions = false }
+  }
+
+  async function deconnecterSession(id: string) {
+    sessionEnCours = id
+    try {
+      const res = await api.delete(`/account/sessions/${id}`)
+      toast.succes('Appareil déconnecté', res.data?.data?.message)
+      await chargerSessions()
+    } catch (e: any) {
+      if (!e.toastAffiche) toast.erreur('Erreur', messageErreur(e, 'Impossible de déconnecter cet appareil'))
+    } finally { sessionEnCours = '' }
+  }
+
+  async function deconnecterAutres() {
+    sessionEnCours = 'autres'
+    try {
+      const res = await api.delete('/account/sessions')
+      toast.succes('Autres appareils déconnectés', res.data?.data?.message)
+      confirmationAutres = false
+      await chargerSessions()
+    } catch (e: any) {
+      if (!e.toastAffiche) toast.erreur('Erreur', messageErreur(e, 'Impossible de déconnecter les autres appareils'))
+    } finally { sessionEnCours = '' }
   }
 
   async function sauvegarderProfil() {
+    erreurProfil = ''
+    const payload: Record<string, string | null> = {}
+    const prenom = formProfil.firstName.trim()
+    const nom = formProfil.lastName.trim()
+    const tel = formProfil.phone.replace(/\s+/g, '')
+    const avatar = formProfil.avatarUrl.trim()
+    if (prenom) payload.firstName = prenom
+    if (nom) payload.lastName = nom
+    if (tel) payload.phone = tel
+    else if (profil?.profile?.phone) payload.phone = null
+    if (avatar) payload.avatarUrl = avatar
+    else if (profil?.profile?.avatarUrl) payload.avatarUrl = null
     actionEnCours = 'profil'
     try {
-      await api.put('/account/profile', formProfil)
+      await api.put('/account/profile', payload)
       toast.succes('Profil mis à jour')
-      // Mettre à jour le store auth
-      auth.update({ fullName: `${formProfil.firstName} ${formProfil.lastName}`.trim() })
       await charger()
+      if (profil?.fullName) auth.update({ fullName: profil.fullName, avatarUrl: profil.profile?.avatarUrl ?? null })
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de sauvegarder')
+      if (e.response?.status === 422) erreurProfil = messageErreur(e, 'Certaines informations sont invalides.')
+      else if (!e.toastAffiche) toast.erreur('Erreur', messageErreur(e, 'Impossible de sauvegarder'))
     } finally { actionEnCours = '' }
   }
 
@@ -59,39 +174,18 @@
     erreursMdp = {}
     actionEnCours = 'mdp'
     try {
-      await api.post('/account/change-password', formMdp)
-      toast.succes('Mot de passe modifié', 'Reconnectez-vous sur vos autres appareils')
+      const res = await api.post('/account/change-password', formMdp)
+      toast.succes('Mot de passe modifié', res.data?.data?.message)
       formMdp = { currentPassword: '', newPassword: '', newPasswordConfirmation: '' }
+      await chargerSessions()
     } catch (e: any) {
-      if (e.response?.status === 422) {
-        e.response.data?.errors?.forEach((err: any) => { erreursMdp[err.field] = err.message })
-      } else {
-        toast.erreur('Erreur', e.response?.data?.message ?? e.response?.data?.error ?? 'Impossible de changer le mot de passe')
+      if (e.response?.status === 422 && Array.isArray(e.response.data?.errors)) {
+        e.response.data.errors.forEach((err: any) => { erreursMdp[err.field] = err.message })
+      } else if (e.response?.status === 400 && e.response.data?.message) {
+        erreursMdp.currentPassword = e.response.data.message
+      } else if (!e.toastAffiche) {
+        toast.erreur('Erreur', messageErreur(e, 'Impossible de changer le mot de passe'))
       }
-    } finally { actionEnCours = '' }
-  }
-
-  async function revoquerSession(id: string) {
-    actionEnCours = id
-    try {
-      await api.delete(`/account/sessions/${id}`)
-      toast.succes('Session révoquée')
-      await charger()
-    } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de révoquer')
-    } finally { actionEnCours = '' }
-  }
-
-  async function revoquerToutesSessions() {
-    actionEnCours = 'all_sessions'
-    try {
-      // Révoquer chaque session individuellement (évite le DELETE sans ID)
-      const sessionsActives = profil?.activeSessions ?? []
-      await Promise.all(sessionsActives.map((s: any) => api.delete(`/account/sessions/${s.id}`).catch(() => {})))
-      toast.succes('Toutes les sessions révoquées')
-      await charger()
-    } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de révoquer')
     } finally { actionEnCours = '' }
   }
 
@@ -113,7 +207,12 @@
     </div>
     <div class="skeleton h-64 rounded-2xl"></div>
   </div>
-{:else if profil}
+{:else if !profil}
+  <div class="bg-white rounded-2xl border border-slate-100 card-shadow py-20 text-center">
+    <p class="text-slate-600 font-semibold">Profil indisponible</p>
+    <button onclick={charger} class="btn-secondary mt-4">Réessayer</button>
+  </div>
+{:else}
   <div class="grid grid-cols-1 lg:grid-cols-3 stagger gap-5">
 
     <!-- Colonne principale -->
@@ -138,12 +237,16 @@
               <p class="font-bold text-slate-900">{profil.profile?.fullName ?? profil.fullName ?? '—'}</p>
               <p class="text-sm text-slate-500">{profil.email}</p>
               <div class="flex gap-1.5 mt-1.5 flex-wrap">
-                {#each (profil.roles ?? []) as role}
-                  <span class="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 font-semibold capitalize">
-                    {role.replace(/_/g, ' ')}
+                {#each [...new Set([profil.role, ...(profil.roles ?? [])].filter(Boolean))] as role}
+                  <span class="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 font-semibold">
+                    {libellesRoles[role] ?? role}
                   </span>
                 {/each}
               </div>
+              <p class="text-xs text-slate-400 mt-1.5">
+                Membre depuis le {formaterDate(profil.createdAt)}
+                {#if profil.profile?.lastLoginAt} · Dernière connexion : {formaterDate(profil.profile.lastLoginAt)}{/if}
+              </p>
             </div>
           </div>
 
@@ -167,6 +270,9 @@
               <input id="prf-avatar" type="url" bind:value={formProfil.avatarUrl} placeholder="https://..." class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
             </div>
           </div>
+          {#if erreurProfil}
+            <p class="text-red-500 text-xs">{erreurProfil}</p>
+          {/if}
           <div class="flex justify-end">
             <button onclick={sauvegarderProfil} disabled={actionEnCours === 'profil'} class="btn-primary">
               {#if actionEnCours === 'profil'}<span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
@@ -241,13 +347,19 @@
             <div class="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
               <span class="material-symbols-outlined text-blue-500 icon-filled" style="font-size:18px">admin_panel_settings</span>
             </div>
-            <h3 class="font-bold text-slate-900">Permissions</h3>
+            <h3 class="font-bold text-slate-900 flex-1">Permissions</h3>
+            {#if profil.permissionsCustomized}
+              <span class="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-semibold">Personnalisées</span>
+            {/if}
           </div>
           <div class="p-5">
+            {#if profil.permissionsCustomized}
+              <p class="text-xs text-slate-400 mb-3">Vos permissions ont été personnalisées par un super administrateur et diffèrent de celles de votre rôle.</p>
+            {/if}
             <div class="grid grid-cols-1 gap-2">
-              {#each Object.entries(profil.permissions).filter(([k]) => !['id', 'userId', 'createdAt', 'updatedAt'].includes(k)) as [key, val]}
+              {#each permissionsAffichees as [key, val]}
                 <div class="flex items-center justify-between">
-                  <span class="text-xs text-slate-600 capitalize">{key.replace(/([A-Z])/g, ' $1').toLowerCase()}</span>
+                  <span class="text-xs text-slate-600">{libellesPermissions[key]}</span>
                   <span class="w-4 h-4 rounded-full flex items-center justify-center {val ? 'bg-emerald-100' : 'bg-slate-100'}">
                     <span class="material-symbols-outlined icon-filled {val ? 'text-emerald-600' : 'text-slate-400'}" style="font-size:12px">
                       {val ? 'check' : 'close'}
@@ -260,44 +372,67 @@
         </div>
       {/if}
 
-      <!-- Sessions actives -->
       <div class="bg-white rounded-2xl border border-slate-100 card-shadow overflow-hidden">
-        <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <div class="w-8 h-8 rounded-lg bg-orange-50 flex items-center justify-center">
-              <span class="material-symbols-outlined text-orange-500 icon-filled" style="font-size:18px">devices</span>
-            </div>
-            <h3 class="font-bold text-slate-900">Sessions actives</h3>
+        <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
+          <div class="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center">
+            <span class="material-symbols-outlined text-emerald-600 icon-filled" style="font-size:18px">devices</span>
           </div>
-          {#if (profil.activeSessions ?? []).length > 1}
-            <button onclick={revoquerToutesSessions} disabled={actionEnCours === 'all_sessions'}
-              class="text-xs text-red-500 font-semibold hover:text-red-600">
-              Tout révoquer
-            </button>
-          {/if}
+          <h3 class="font-bold text-slate-900">Sessions actives</h3>
         </div>
         <div class="divide-y divide-slate-50">
-          {#if (profil.activeSessions ?? []).length === 0}
-            <div class="py-8 text-center text-slate-400 text-sm">Aucune session active</div>
+          {#if chargementSessions && sessions.length === 0}
+            <div class="p-5 space-y-2">{#each Array(2) as _}<div class="skeleton h-12 rounded-xl"></div>{/each}</div>
+          {:else if sessions.length === 0}
+            <p class="p-5 text-sm text-slate-400 text-center">Aucune session active</p>
           {:else}
-            {#each profil.activeSessions as sess}
-              <div class="flex items-start gap-3 px-5 py-3.5">
-                <div class="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center shrink-0 mt-0.5">
-                  <span class="material-symbols-outlined text-slate-500" style="font-size:16px">computer</span>
-                </div>
+            {#each sessions as sess (sess.id)}
+              <div class="px-5 py-3 flex items-start gap-3">
+                <span class="material-symbols-outlined text-slate-400 mt-0.5" style="font-size:18px">
+                  {estMobile(sess.userAgent) ? 'smartphone' : 'computer'}
+                </span>
                 <div class="flex-1 min-w-0">
-                  <p class="text-xs font-semibold text-slate-700 truncate">{sess.ipAddress ?? '—'}</p>
-                  <p class="text-xs text-slate-400 mt-0.5">{formaterDate(sess.createdAt)}</p>
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <p class="text-sm font-semibold text-slate-800 truncate" title={sess.userAgent ?? ''}>{decrireAppareil(sess.userAgent)}</p>
+                    {#if sess.isCurrent}
+                      <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-semibold">Cet appareil</span>
+                    {/if}
+                  </div>
+                  <p class="text-xs text-slate-400">Adresse IP : <span class="font-mono">{sess.ipAddress ?? '—'}</span></p>
+                  <p class="text-xs text-slate-400">Connecté le {formaterDate(sess.createdAt)}</p>
+                  <p class="text-xs text-slate-400">Dernière activité : {formaterDate(sess.lastUsedAt)}</p>
                 </div>
-                <button onclick={() => revoquerSession(sess.id)} disabled={actionEnCours === sess.id}
-                  class="text-xs text-red-500 hover:text-red-600 font-medium shrink-0 disabled:opacity-50">
-                  {actionEnCours === sess.id ? '...' : 'Révoquer'}
-                </button>
+                {#if !sess.isCurrent}
+                  <button onclick={() => deconnecterSession(sess.id)} disabled={sessionEnCours !== ''}
+                    class="text-xs px-2.5 py-1.5 rounded-lg border border-red-200 text-red-600 font-semibold hover:bg-red-50 disabled:opacity-50 shrink-0">
+                    {sessionEnCours === sess.id ? '...' : 'Déconnecter'}
+                  </button>
+                {/if}
               </div>
             {/each}
           {/if}
         </div>
+        {#if sessions.some((s) => !s.isCurrent)}
+          <div class="px-5 py-4 border-t border-slate-100">
+            {#if confirmationAutres}
+              <p class="text-xs text-slate-600 mb-2">Tous vos autres appareils seront déconnectés. Cet appareil reste connecté.</p>
+              <div class="flex gap-2">
+                <button onclick={() => confirmationAutres = false} class="btn-secondary flex-1 justify-center">Annuler</button>
+                <button onclick={deconnecterAutres} disabled={sessionEnCours !== ''}
+                  class="flex-1 px-3 py-2 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 disabled:opacity-50">
+                  {sessionEnCours === 'autres' ? '...' : 'Confirmer'}
+                </button>
+              </div>
+            {:else}
+              <button onclick={() => confirmationAutres = true}
+                class="w-full px-3 py-2 rounded-xl border border-red-200 text-red-600 text-sm font-semibold hover:bg-red-50 flex items-center justify-center gap-1.5">
+                <span class="material-symbols-outlined" style="font-size:16px">logout</span>
+                Déconnecter les autres appareils
+              </button>
+            {/if}
+          </div>
+        {/if}
       </div>
+
     </div>
   </div>
 {/if}

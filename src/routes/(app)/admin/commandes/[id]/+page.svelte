@@ -4,7 +4,8 @@
   import { goto } from '$app/navigation'
   import api from '$lib/api'
   import { toast } from '$lib/stores/toast.svelte'
-  import Badge from '$lib/components/ui/Badge.svelte'
+  import { auth } from '$lib/stores/auth.svelte'
+  import Badge, { libelleStatut, libelleService } from '$lib/components/ui/Badge.svelte'
 
   const id = $derived($page.params.id)
 
@@ -26,16 +27,69 @@
   let raisonRemboursement = $state('')
   let scores = $state<any[]>([])
 
-  const statutsDisponibles = [
-    { val: 'pending_admin_review', label: 'En révision admin' },
-    { val: 'admin_approved',       label: 'Approuvée' },
-    { val: 'assigned_to_cabin',    label: 'Assignée à une cabine' },
-    { val: 'awaiting_payment',     label: 'En attente de paiement' },
-    { val: 'in_progress',          label: 'En cours' },
-    { val: 'completed',            label: 'Complétée' },
-    { val: 'cancelled',            label: 'Annulée' },
-    { val: 'rejected',             label: 'Rejetée' },
-  ]
+  let lienPaiement = $state<string | null>(null)
+  let afficherModalLien = $state(false)
+
+  const transitionsAutorisees: Record<string, string[]> = {
+    pending_admin_review: ['admin_approved', 'rejected', 'assigned_to_cabin'],
+    admin_approved:       ['assigned_to_cabin', 'awaiting_payment', 'rejected'],
+    assigned_to_cabin:    ['in_progress', 'returned_to_admin', 'cancelled'],
+    awaiting_payment:     ['in_progress', 'payment_failed', 'payment_timeout', 'cancelled'],
+    in_progress:          ['completed', 'returned_to_admin', 'cancelled'],
+    returned_to_admin:    ['assigned_to_cabin', 'rejected', 'cancelled'],
+  }
+
+  const statutsDisponibles = $derived(
+    (transitionsAutorisees[commande?.status] ?? []).map((val) => ({ val, label: libelleStatut(val) }))
+  )
+
+  const libellesMethodes: Record<string, string> = {
+    mobile_money: 'Mobile Money',
+    orange_money: 'Orange Money',
+    mtn_money: 'MTN MoMo',
+    wallet: 'Portefeuille',
+    cash: 'Espèces',
+    virement: 'Virement',
+    mock: 'Simulation (test)',
+    notchpay: 'NotchPay',
+    cinetpay: 'CinetPay',
+    moneyfusion: 'MoneyFusion',
+  }
+
+  const libellesTypesCabine: Record<string, string> = { basic: 'Basique', standard: 'Standard', premium: 'Premium' }
+
+  function libelleMethode(m: string | null | undefined) {
+    if (!m) return '—'
+    return libellesMethodes[m] ?? m
+  }
+
+  function pourcentage(n: any) {
+    const num = Number(n)
+    return isNaN(num) ? '—' : Math.round(num * 100) + ' %'
+  }
+
+  function copierLien(url: string) {
+    navigator.clipboard.writeText(url)
+    toast.succes('Lien copié')
+  }
+
+  const statutsRemboursables = ['completed', 'in_progress', 'rejected', 'cancelled', 'expired', 'payment_failed', 'payment_timeout']
+
+  const peutAssigner = $derived(
+    auth.peut('canAssignOrders') && !!commande && !commande.cabinId && ['pending_admin_review', 'admin_approved', 'returned_to_admin'].includes(commande.status)
+  )
+  const peutValiderPaiement = $derived(
+    auth.peut('canValidatePayments') && !!commande && ['awaiting_payment', 'pending_payment'].includes(commande.status)
+  )
+  const peutRembourser = $derived(
+    auth.peut('canRefundOrders') && !!commande && !!commande.paymentVerified && !commande.refundedAt &&
+    statutsRemboursables.includes(commande.status) &&
+    (commande.status !== 'completed' || auth.user?.role === 'super_admin')
+  )
+  const peutCreerLien = $derived(
+    !!commande && !!commande.amount && !commande.paymentVerified &&
+    ['pending', 'pending_admin_review', 'awaiting_payment', 'pending_payment'].includes(commande.status)
+  )
 
   function formaterMontant(n: any) {
     const num = Number(n)
@@ -100,8 +154,15 @@
     actionEnCours = 'lien'
     try {
       const res = await api.post(`/admin/orders/${id}/payment-link`)
-      const url = res.data?.data?.paymentUrl
-      toast.succes('Lien créé', url ? 'Lien de paiement généré' : '')
+      const url = res.data?.data?.paymentUrl ?? null
+      if (url) {
+        lienPaiement = url
+        afficherModalLien = true
+      } else if (res.data?.data?.confirmed) {
+        toast.succes('Paiement confirmé', 'Confirmé automatiquement (paiement en mode simulation)')
+      } else {
+        toast.succes('Lien de paiement généré')
+      }
       await charger()
     } catch (e: any) {
       toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de créer le lien')
@@ -138,13 +199,14 @@
       raisonRemboursement = ''
       await charger()
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de rembourser')
+      if (!e.toastAffiche) toast.erreur('Remboursement refusé', e.response?.data?.message ?? 'Impossible de rembourser')
     } finally {
       actionEnCours = ''
     }
   }
 
   async function voirScores() {
+    if (!auth.peut('canAssignOrders')) return
     actionEnCours = 'scores'
     try {
       const res = await api.get(`/admin/orders/${id}/cabin-scores`)
@@ -172,17 +234,19 @@
       <h2 class="font-black text-2xl text-slate-900" style="letter-spacing:-0.02em">
         Commande <span class="text-orange-500 font-mono">#{commande?.orderCode ?? (id as string).slice(-8)}</span>
       </h2>
-      <p class="text-sm text-slate-500 mt-0.5">{formaterDate(commande?.createdAt ?? commande?.created_at)}</p>
+      <p class="text-sm text-slate-500 mt-0.5">{formaterDate(commande?.timestamp ?? commande?.createdAt)}</p>
     </div>
   </div>
   {#if commande}
     <div class="flex items-center gap-2 flex-wrap">
       <Badge statut={commande.status} />
-      <button onclick={() => { nouveauStatut = commande.status; afficherModalStatut = true }} class="btn-secondary">
-        <span class="material-symbols-outlined icon-filled" style="font-size:16px">edit</span>
-        Changer statut
-      </button>
-      {#if commande.status === 'admin_approved'}
+      {#if statutsDisponibles.length > 0}
+        <button onclick={() => { nouveauStatut = statutsDisponibles[0]?.val ?? ''; afficherModalStatut = true }} class="btn-secondary">
+          <span class="material-symbols-outlined icon-filled" style="font-size:16px">edit</span>
+          Changer statut
+        </button>
+      {/if}
+      {#if peutAssigner}
         <button onclick={assigner} disabled={actionEnCours === 'assigner'} class="btn-primary">
           {#if actionEnCours === 'assigner'}
             <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
@@ -196,7 +260,7 @@
           Scores cabines
         </button>
       {/if}
-      {#if commande.status === 'awaiting_payment' || commande.status === 'pending_payment'}
+      {#if peutCreerLien}
         <button onclick={creerLienPaiement} disabled={actionEnCours === 'lien'} class="btn-secondary">
           {#if actionEnCours === 'lien'}
             <span class="w-4 h-4 border-2 border-orange-300 border-t-orange-500 rounded-full animate-spin"></span>
@@ -205,12 +269,14 @@
           {/if}
           Lien paiement
         </button>
+      {/if}
+      {#if peutValiderPaiement}
         <button onclick={() => afficherModalPaiement = true} class="btn-secondary">
           <span class="material-symbols-outlined icon-filled" style="font-size:16px">verified</span>
           Valider paiement
         </button>
       {/if}
-      {#if ['completed', 'in_progress'].includes(commande.status)}
+      {#if peutRembourser}
         <button onclick={() => afficherModalRemboursement = true} class="px-3 py-2 rounded-xl border border-red-200 text-red-600 text-sm font-semibold hover:bg-red-50 flex items-center gap-1.5">
           <span class="material-symbols-outlined icon-filled" style="font-size:16px">currency_exchange</span>
           Rembourser
@@ -248,7 +314,7 @@
         <div class="p-5 grid grid-cols-2 sm:grid-cols-3 gap-5">
           <div>
             <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Service</p>
-            <p class="text-sm font-semibold text-slate-800 capitalize">{commande.serviceType ?? commande.service_type ?? '—'}</p>
+            <p class="text-sm font-semibold text-slate-800">{libelleService(commande.serviceType)}</p>
           </div>
           <div>
             <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Réseau</p>
@@ -327,7 +393,7 @@
           <div class="p-5 grid grid-cols-2 sm:grid-cols-3 gap-5">
             <div>
               <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Méthode</p>
-              <p class="text-sm font-semibold text-slate-800 capitalize">{pmt.paymentMethod ?? pmt.payment_method ?? '—'}</p>
+              <p class="text-sm font-semibold text-slate-800">{libelleMethode(pmt.paymentMethod)}</p>
             </div>
             <div>
               <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Montant</p>
@@ -358,13 +424,18 @@
               </div>
             {/if}
           </div>
-          {#if commande.paymentGatewayUrl ?? commande.payment_gateway_url}
-            <div class="px-5 pb-5">
-              <a href={commande.paymentGatewayUrl ?? commande.payment_gateway_url} target="_blank" rel="noopener"
+          {#if commande.paymentGatewayUrl}
+            <div class="px-5 pb-5 flex items-center gap-3 flex-wrap">
+              <a href={commande.paymentGatewayUrl} target="_blank" rel="noopener"
                 class="inline-flex items-center gap-1.5 text-sm text-orange-600 font-semibold hover:text-orange-700">
                 <span class="material-symbols-outlined icon-filled" style="font-size:16px">open_in_new</span>
                 Voir le lien de paiement
               </a>
+              <button onclick={() => copierLien(commande.paymentGatewayUrl)}
+                class="inline-flex items-center gap-1.5 text-sm text-slate-500 font-semibold hover:text-slate-700">
+                <span class="material-symbols-outlined" style="font-size:16px">content_copy</span>
+                Copier
+              </button>
             </div>
           {/if}
         </div>
@@ -410,13 +481,15 @@
               {#if cab.type}
                 <div class="flex items-center gap-2 text-slate-600">
                   <span class="material-symbols-outlined" style="font-size:14px">grade</span>
-                  <span class="capitalize">{cab.type}</span>
+                  <span>{libellesTypesCabine[cab.type] ?? cab.type}</span>
                 </div>
               {/if}
             </div>
-            <a href="/admin/cabines/{cab.id}" class="block text-center text-xs text-orange-500 font-semibold hover:text-orange-600 mt-2">
-              Voir la cabine →
-            </a>
+            {#if auth.peut('canManageCabins')}
+              <a href="/admin/cabines/{cab.id}" class="block text-center text-xs text-orange-500 font-semibold hover:text-orange-600 mt-2">
+                Voir la cabine →
+              </a>
+            {/if}
           </div>
         {:else}
           <div class="p-5 text-center">
@@ -438,13 +511,14 @@
         </div>
         <div class="p-5 space-y-3">
           {#each [
-            { label: 'Créée', date: commande.createdAt ?? commande.created_at, icone: 'add_circle', couleur: 'text-slate-400' },
-            { label: 'Allouée', date: commande.allocatedAt ?? commande.allocated_at, icone: 'assignment_ind', couleur: 'text-blue-500' },
-            { label: 'Paiement demandé', date: commande.paymentRequestedAt ?? commande.payment_requested_at, icone: 'payments', couleur: 'text-amber-500' },
-            { label: 'Payée', date: commande.paidAt ?? commande.paid_at, icone: 'check_circle', couleur: 'text-emerald-500' },
-            { label: 'Complétée', date: commande.completedAt ?? commande.completed_at, icone: 'task_alt', couleur: 'text-emerald-600' },
-            { label: 'Annulée', date: commande.cancelledAt ?? commande.cancelled_at, icone: 'cancel', couleur: 'text-red-500' },
-            { label: 'Remboursée', date: commande.refundedAt ?? commande.refunded_at, icone: 'currency_exchange', couleur: 'text-teal-500' },
+            { label: 'Créée', date: commande.timestamp, icone: 'add_circle', couleur: 'text-slate-400' },
+            { label: 'Lien de paiement créé', date: commande.paymentLinkCreatedAt, icone: 'link', couleur: 'text-amber-500' },
+            { label: 'Paiement demandé', date: commande.paymentRequestedAt, icone: 'payments', couleur: 'text-amber-500' },
+            { label: 'Payée', date: commande.paidAt, icone: 'check_circle', couleur: 'text-emerald-500' },
+            { label: 'Assignée à une cabine', date: commande.allocatedAt, icone: 'assignment_ind', couleur: 'text-blue-500' },
+            { label: 'Complétée', date: commande.completedAt, icone: 'task_alt', couleur: 'text-emerald-600' },
+            { label: 'Annulée', date: commande.cancelledAt, icone: 'cancel', couleur: 'text-red-500' },
+            { label: 'Remboursée', date: commande.refundedAt, icone: 'currency_exchange', couleur: 'text-teal-500' },
           ].filter(e => e.date) as evt}
             <div class="flex items-start gap-2.5">
               <span class="material-symbols-outlined icon-filled {evt.couleur} shrink-0 mt-0.5" style="font-size:16px">{evt.icone}</span>
@@ -454,10 +528,16 @@
               </div>
             </div>
           {/each}
-          {#if commande.cancellationReason ?? commande.cancellation_reason}
+          {#if commande.cancellationReason}
             <div class="mt-2 p-3 rounded-xl bg-red-50 border border-red-100">
               <p class="text-xs font-semibold text-red-700 mb-0.5">Raison d'annulation</p>
-              <p class="text-xs text-red-600">{commande.cancellationReason ?? commande.cancellation_reason}</p>
+              <p class="text-xs text-red-600">{commande.cancellationReason}</p>
+            </div>
+          {/if}
+          {#if commande.returnReason}
+            <div class="mt-2 p-3 rounded-xl bg-purple-50 border border-purple-100">
+              <p class="text-xs font-semibold text-purple-700 mb-0.5">Motif du retour</p>
+              <p class="text-xs text-purple-600">{commande.returnReason}</p>
             </div>
           {/if}
         </div>
@@ -469,7 +549,7 @@
         <div class="space-y-2 text-sm">
           <div class="flex justify-between">
             <span class="text-slate-500">Méthode</span>
-            <span class="font-semibold text-slate-800 capitalize">{commande.paymentMethod ?? commande.payment_method ?? '—'}</span>
+            <span class="font-semibold text-slate-800">{libelleMethode(commande.paymentMethod)}</span>
           </div>
           <div class="flex justify-between">
             <span class="text-slate-500">Vérifié</span>
@@ -577,15 +657,15 @@
       </div>
       <div class="p-6 space-y-4">
         <p class="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
-          Cette action est irréversible. Le client sera remboursé du montant de la commande.
+          Cette action est irréversible. Le client sera remboursé du montant payé, frais compris.
         </p>
         <div>
           <label for="raison-remboursement" class="block text-xs font-semibold text-slate-600 mb-1.5">Raison du remboursement *</label>
-          <textarea id="raison-remboursement" bind:value={raisonRemboursement} rows="3" placeholder="Expliquez la raison du remboursement..." class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm resize-none" required></textarea>
+          <textarea id="raison-remboursement" bind:value={raisonRemboursement} rows="3" placeholder="Expliquez la raison du remboursement (3 caractères minimum)..." class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm resize-none" required></textarea>
         </div>
         <div class="flex gap-3">
           <button onclick={() => afficherModalRemboursement = false} class="btn-secondary flex-1">Annuler</button>
-          <button onclick={rembourser} disabled={!raisonRemboursement || actionEnCours === 'rembourser'} class="flex-1 px-4 py-2.5 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2">
+          <button onclick={rembourser} disabled={raisonRemboursement.trim().length < 3 || actionEnCours === 'rembourser'} class="flex-1 px-4 py-2.5 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2">
             {#if actionEnCours === 'rembourser'}
               <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
             {:else}
@@ -621,11 +701,11 @@
               <div class="flex items-center gap-4 px-6 py-3.5">
                 <span class="text-lg font-black {i === 0 ? 'text-orange-500' : 'text-slate-300'} w-6 text-center">#{i + 1}</span>
                 <div class="flex-1 min-w-0">
-                  <p class="text-sm font-semibold text-slate-800">{s.cabin?.name ?? s.name ?? '—'}</p>
-                  <p class="text-xs text-slate-400">{s.cabin?.city ?? s.city ?? ''}</p>
+                  <p class="text-sm font-semibold text-slate-800">{s.cabinName ?? '—'}</p>
+                  <p class="text-xs text-slate-400">Complétion {pourcentage(s.completionRate)} · Charge {pourcentage(s.loadRatio)}</p>
                 </div>
                 <div class="text-right">
-                  <p class="text-sm font-bold text-slate-900">{s.score ?? '—'}</p>
+                  <p class="text-sm font-bold text-slate-900">{pourcentage(s.score)}</p>
                   <p class="text-xs text-slate-400">score</p>
                 </div>
               </div>
@@ -634,10 +714,40 @@
         {/if}
       </div>
       <div class="px-6 py-4 border-t border-slate-100">
-        <button onclick={() => { afficherModalScores = false; assigner() }} class="btn-primary w-full justify-center">
+        <button onclick={() => { afficherModalScores = false; assigner() }} disabled={scores.length === 0} class="btn-primary w-full justify-center disabled:opacity-50">
           <span class="material-symbols-outlined icon-filled" style="font-size:16px">assignment_ind</span>
           Assigner automatiquement
         </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if afficherModalLien && lienPaiement}
+  <div class="fixed inset-0 z-50 grid place-items-center min-h-screen p-4" style="background:rgba(0,0,0,0.4)">
+    <div class="bg-white rounded-2xl w-full max-w-md animate-fade-in-up" style="box-shadow: 0 25px 60px rgba(0,0,0,0.18)">
+      <div class="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
+        <h3 class="font-bold text-slate-900 flex items-center gap-2">
+          <span class="material-symbols-outlined text-emerald-500 icon-filled" style="font-size:20px">link</span>
+          Lien de paiement
+        </h3>
+        <button onclick={() => afficherModalLien = false} class="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400">
+          <span class="material-symbols-outlined" style="font-size:18px">close</span>
+        </button>
+      </div>
+      <div class="p-6 space-y-4">
+        <p class="text-sm text-slate-600">Partagez ce lien au client pour qu'il puisse effectuer son paiement.</p>
+        <div class="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center gap-2">
+          <p class="text-xs font-mono text-slate-700 flex-1 break-all">{lienPaiement}</p>
+          <button
+            onclick={() => copierLien(lienPaiement!)}
+            class="shrink-0 w-8 h-8 rounded-lg bg-orange-50 text-orange-500 hover:bg-orange-100 flex items-center justify-center"
+            title="Copier"
+          >
+            <span class="material-symbols-outlined" style="font-size:16px">content_copy</span>
+          </button>
+        </div>
+        <button onclick={() => afficherModalLien = false} class="btn-primary w-full justify-center">Fermer</button>
       </div>
     </div>
   </div>

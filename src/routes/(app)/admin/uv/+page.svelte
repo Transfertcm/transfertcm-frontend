@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
   import api from '$lib/api'
   import { toast } from '$lib/stores/toast.svelte'
   import { t, translate } from '$lib/stores/locale'
@@ -15,7 +15,14 @@
 
   // SIM Cards
   let simCards = $state<any[]>([])
+  let simCardsValidation = $state<any[]>([])
   let filtreReseau = $state('')
+
+  let cabines = $state<any[]>([])
+  const nomsCabines = $derived(Object.fromEntries(cabines.map((c) => [c.id, c.name])))
+
+  let toutesSims = $state<any[]>([])
+  const nomsSims = $derived(Object.fromEntries(toutesSims.map((s) => [s.id, s.cardName])))
 
   // Historique
   let historique = $state<any[]>([])
@@ -29,12 +36,25 @@
   let afficherModalSim = $state(false)
   let afficherModalValider = $state(false)
   let afficherModalRejeter = $state(false)
+  let afficherModalSolde = $state(false)
+  let simSelectionnee = $state<any>(null)
   let demandeSelectionnee = $state<any>(null)
 
   // Formulaires
-  let formSim = $state({ network: 'mtn', cardName: '', phoneNumber: '', assignedCabinId: '' })
+  let formSim = $state<{ network: string; cardName: string; phoneNumber: string; assignedCabinId: string; currentBalance: number | null }>({ network: 'mtn', cardName: '', phoneNumber: '', assignedCabinId: '', currentBalance: null })
+  let formSolde = $state<{ sens: 'recharge' | 'correction'; montant: number | null; description: string }>({ sens: 'recharge', montant: null, description: '' })
   let simCardId = $state('')
   let raisonRejet = $state('')
+
+  const simChoisie = $derived(simCardsValidation.find((s) => s.id === simCardId) ?? null)
+  const deltaSolde = $derived(formSolde.montant ? (formSolde.sens === 'recharge' ? 1 : -1) * Math.abs(Math.trunc(formSolde.montant)) : 0)
+  const nouveauSolde = $derived(simSelectionnee ? Number(simSelectionnee.currentBalance ?? 0) + deltaSolde : 0)
+  const soldeInitialValide = $derived(formSim.currentBalance == null || (Number.isInteger(formSim.currentBalance) && formSim.currentBalance >= 0))
+
+  function messageErreur(e: any, defaut: string) {
+    const erreurs = e.response?.data?.errors
+    return e.response?.data?.message ?? (Array.isArray(erreurs) && erreurs.length ? erreurs.map((x: any) => x.message).join(' • ') : defaut)
+  }
 
   function formaterDate(d: string | null) {
     if (!d) return '—'
@@ -47,9 +67,8 @@
       const params: any = { page: pageDem, per_page: 20 }
       if (filtreStatutDem) params.status = filtreStatutDem
       const res = await api.get('/admin/uv/requests', { params })
-      const d = res.data?.data
-      demandes = d?.data ?? d ?? []
-      metaDem = d?.meta ?? null
+      demandes = res.data?.data ?? []
+      metaDem = res.data?.meta ?? null
     } catch { toast.erreur(translate('toast.error'), translate('common.error_load')) }
     finally { chargement = false }
   }
@@ -65,13 +84,38 @@
     finally { chargement = false }
   }
 
+  async function chargerToutesSims() {
+    try {
+      const res = await api.get('/admin/uv/sim-cards')
+      toutesSims = res.data?.data ?? []
+    } catch { toutesSims = [] }
+  }
+
+  async function chargerCabines() {
+    try {
+      const res = await api.get('/cabins', { params: { page: 1, perPage: 200 } })
+      cabines = res.data?.data ?? []
+    } catch { cabines = [] }
+  }
+
+  async function ouvrirValidation(dem: any) {
+    demandeSelectionnee = dem
+    simCardId = ''
+    afficherModalValider = true
+    try {
+      const params: any = { is_active: 'true' }
+      if (dem.network) params.network = dem.network
+      const res = await api.get('/admin/uv/sim-cards', { params })
+      simCardsValidation = res.data?.data ?? []
+    } catch { simCardsValidation = [] }
+  }
+
   async function chargerHistorique() {
     chargement = true
     try {
       const res = await api.get('/admin/uv/history', { params: { page: pageHist, per_page: 20 } })
-      const d = res.data?.data
-      historique = d?.data ?? d ?? []
-      metaHist = d?.meta ?? null
+      historique = res.data?.data ?? []
+      metaHist = res.data?.meta ?? null
     } catch { toast.erreur(translate('toast.error'), translate('common.error_load')) }
     finally { chargement = false }
   }
@@ -88,7 +132,7 @@
       simCardId = ''
       await chargerDemandes()
     } catch (e: any) {
-      toast.erreur(translate('toast.error'), e.response?.data?.message ?? translate('common.error_save'))
+      if (!e.toastAffiche) toast.erreur('Validation refusée', messageErreur(e, translate('common.error_save')))
     } finally { actionEnCours = '' }
   }
 
@@ -102,35 +146,85 @@
       raisonRejet = ''
       await chargerDemandes()
     } catch (e: any) {
-      toast.erreur(translate('toast.error'), e.response?.data?.message ?? translate('common.error_save'))
+      if (!e.toastAffiche) toast.erreur(translate('toast.error'), messageErreur(e, translate('common.error_save')))
     } finally { actionEnCours = '' }
   }
 
   async function creerSimCard() {
     actionEnCours = 'sim'
     try {
-      await api.post('/admin/uv/sim-cards', formSim)
+      const payload: any = { ...formSim }
+      if (!payload.assignedCabinId) delete payload.assignedCabinId
+      if (payload.currentBalance == null) delete payload.currentBalance
+      payload.phoneNumber = payload.phoneNumber.replace(/[\s\-]/g, '')
+      await api.post('/admin/uv/sim-cards', payload)
       toast.succes(translate('admin.uv.sim_created'))
       afficherModalSim = false
-      formSim = { network: 'mtn', cardName: '', phoneNumber: '', assignedCabinId: '' }
-      await chargerSimCards()
+      formSim = { network: 'mtn', cardName: '', phoneNumber: '', assignedCabinId: '', currentBalance: null }
+      await Promise.all([chargerSimCards(), chargerToutesSims()])
     } catch (e: any) {
-      toast.erreur(translate('toast.error'), e.response?.data?.message ?? translate('common.error_save'))
+      if (!e.toastAffiche) toast.erreur(translate('toast.error'), messageErreur(e, translate('common.error_save')))
     } finally { actionEnCours = '' }
   }
 
+  function ouvrirSolde(sim: any) {
+    simSelectionnee = sim
+    formSolde = { sens: 'recharge', montant: null, description: '' }
+    afficherModalSolde = true
+  }
+
+  async function ajusterSolde() {
+    if (!simSelectionnee || !deltaSolde || nouveauSolde < 0) return
+    actionEnCours = 'solde'
+    try {
+      await api.patch(`/admin/uv/sim-cards/${simSelectionnee.id}/balance`, {
+        delta: deltaSolde,
+        description: formSolde.description.trim(),
+      })
+      toast.succes('Solde de la SIM mis à jour', `Nouveau solde : ${nouveauSolde} UV`)
+      afficherModalSolde = false
+      simSelectionnee = null
+      await Promise.all([chargerSimCards(), chargerToutesSims()])
+    } catch (e: any) {
+      if (!e.toastAffiche) toast.erreur('Mise à jour refusée', messageErreur(e, translate('common.error_save')))
+    } finally { actionEnCours = '' }
+  }
+
+  function estCredit(tx: any) {
+    if (tx.balanceBefore !== null && tx.balanceBefore !== undefined && tx.balanceAfter !== null && tx.balanceAfter !== undefined) {
+      return Number(tx.balanceAfter) >= Number(tx.balanceBefore)
+    }
+    return tx.transactionType === 'recharge' || tx.transactionType === 'sim_recharge'
+  }
+
   $effect(() => {
-    if (onglet === 'demandes') chargerDemandes()
-    else if (onglet === 'simcards') chargerSimCards()
-    else chargerHistorique()
+    const o = onglet
+    untrack(() => {
+      if (o === 'demandes') chargerDemandes()
+      else if (o === 'simcards') chargerSimCards()
+      else chargerHistorique()
+    })
   })
 
-  onMount(chargerDemandes)
+  onMount(() => {
+    chargerCabines()
+    chargerToutesSims()
+  })
+
+  const libellesType: Record<string, string> = {
+    recharge: 'Recharge',
+    deduction: 'Déduction',
+    adjustment: 'Ajustement',
+    sim_recharge: 'Recharge SIM',
+    sim_adjustment: 'Correction SIM',
+  }
 
   const couleurType: Record<string, string> = {
     recharge: 'text-emerald-600 bg-emerald-50',
     deduction: 'text-red-600 bg-red-50',
     adjustment: 'text-blue-600 bg-blue-50',
+    sim_recharge: 'text-emerald-600 bg-emerald-50',
+    sim_adjustment: 'text-blue-600 bg-blue-50',
   }
 </script>
 
@@ -164,11 +258,12 @@
 <!-- ── Demandes ── -->
 {#if onglet === 'demandes'}
   <div class="bg-white rounded-2xl border border-slate-100 card-shadow p-4 mb-5">
-    <select bind:value={filtreStatutDem} onchange={chargerDemandes} class="px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
+    <select bind:value={filtreStatutDem} onchange={() => { pageDem = 1; chargerDemandes() }} class="px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
       <option value="">{$t('common.all')}</option>
       <option value="pending">{$t('status.pending')}</option>
       <option value="validated">{$t('admin.uv.status_validated')}</option>
       <option value="rejected">{$t('status.rejected')}</option>
+      <option value="cancelled">{$t('status.cancelled')}</option>
     </select>
   </div>
 
@@ -194,14 +289,14 @@
         {#each demandes as dem}
           <div class="flex flex-col gap-2 lg:grid lg:grid-cols-12 lg:gap-3 lg:items-center px-5 py-3.5 hover:bg-slate-50 transition-all">
             <div class="lg:col-span-3">
-              <p class="text-sm font-semibold text-slate-800">{dem.cabin_name ?? '—'}</p>
+              <p class="text-sm font-semibold text-slate-800">{dem.cabinName ?? nomsCabines[dem.cabinId] ?? '—'}</p>
             </div>
             <div class="lg:col-span-2">
-              <p class="text-sm font-bold text-slate-900">{dem.amount_requested ?? '—'} UV</p>
-              {#if dem.payment_amount}
+              <p class="text-sm font-bold text-slate-900">{dem.amountRequested ?? '—'} UV</p>
+              {#if dem.paymentAmount}
                 <p class="text-xs text-slate-400 mt-0.5">
-                  <span class="w-1.5 h-1.5 rounded-full inline-block align-middle mr-1 {dem.payment_method === 'mtn' ? 'bg-amber-400' : 'bg-orange-500'}"></span>
-                  {Number(dem.payment_amount).toLocaleString('fr-CM')} XAF
+                  <span class="w-1.5 h-1.5 rounded-full inline-block align-middle mr-1 {dem.paymentMethod === 'mtn' ? 'bg-amber-400' : 'bg-orange-500'}"></span>
+                  {Number(dem.paymentAmount).toLocaleString('fr-CM')} XAF
                 </p>
               {/if}
             </div>
@@ -209,16 +304,20 @@
               <span class="text-xs font-semibold px-2.5 py-1 rounded-full border
                 {dem.status === 'pending' ? 'bg-amber-100 text-amber-700 border-amber-200' :
                  dem.status === 'validated' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' :
+                 dem.status === 'cancelled' ? 'bg-slate-100 text-slate-600 border-slate-200' :
                  'bg-red-100 text-red-700 border-red-200'}">
-                {dem.status === 'pending' ? $t('status.pending') : dem.status === 'validated' ? $t('admin.uv.status_validated') : $t('status.rejected')}
+                {dem.status === 'pending' ? $t('status.pending') : dem.status === 'validated' ? $t('admin.uv.status_validated') : dem.status === 'cancelled' ? $t('status.cancelled') : $t('status.rejected')}
               </span>
             </div>
             <div class="lg:col-span-3">
-              <p class="text-xs text-slate-500">{formaterDate(dem.created_at)}</p>
+              <p class="text-xs text-slate-500">{formaterDate(dem.createdAt)}</p>
+              {#if dem.status === 'rejected' && dem.rejectionReason}
+                <p class="text-xs text-red-500 mt-0.5">{dem.rejectionReason}</p>
+              {/if}
             </div>
             <div class="lg:col-span-2 flex gap-1.5">
               {#if dem.status === 'pending'}
-                <button onclick={() => { demandeSelectionnee = dem; afficherModalValider = true }}
+                <button onclick={() => ouvrirValidation(dem)}
                   class="text-xs px-2 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 font-semibold hover:bg-emerald-100 flex items-center gap-1">
                   <span class="material-symbols-outlined icon-filled" style="font-size:13px">check</span>
                   {$t('admin.uv.validate')}
@@ -232,6 +331,15 @@
           </div>
         {/each}
       </div>
+      {#if metaDem && metaDem.lastPage > 1}
+        <div class="px-5 py-4 border-t border-slate-100 flex items-center justify-between">
+          <p class="text-sm text-slate-500">{$t('pagination.page')} {metaDem.currentPage} {$t('pagination.of')} {metaDem.lastPage}</p>
+          <div class="flex gap-2">
+            <button onclick={() => { pageDem--; chargerDemandes() }} disabled={pageDem <= 1} class="px-3 py-1.5 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed">← {$t('button.previous')}</button>
+            <button onclick={() => { pageDem++; chargerDemandes() }} disabled={pageDem >= metaDem.lastPage} class="px-3 py-1.5 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed">{$t('button.next')} →</button>
+          </div>
+        </div>
+      {/if}
     {/if}
   </div>
 
@@ -239,7 +347,7 @@
 {:else if onglet === 'simcards'}
   <div class="bg-white rounded-2xl border border-slate-100 card-shadow p-4 mb-5">
     <select bind:value={filtreReseau} onchange={chargerSimCards} class="px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
-      <option value="">{$t('admin.cabins.all_types')}</option>
+      <option value="">{$t('admin.orders.all_networks')}</option>
       <option value="mtn">MTN</option>
       <option value="orange">Orange</option>
     </select>
@@ -264,15 +372,23 @@
               <span class="w-3 h-3 rounded-full" style="background:{sim.network === 'mtn' ? '#fbbf24' : '#f97316'}"></span>
             </div>
             <div class="flex-1 min-w-0">
-              <p class="text-sm font-semibold text-slate-800">{sim.card_name ?? '—'}</p>
-              <p class="text-xs font-mono text-slate-500">{sim.phone_number ?? '—'}</p>
+              <p class="text-sm font-semibold text-slate-800">{sim.cardName ?? '—'}</p>
+              <p class="text-xs font-mono text-slate-500">{sim.phoneNumber ?? '—'} · {sim.network === 'mtn' ? 'MTN' : sim.network === 'orange' ? 'Orange' : (sim.network ?? '—')}</p>
+              {#if sim.assignedCabinId}
+                <p class="text-xs text-slate-400">{$t('admin.cabins.col_cabin')} : {nomsCabines[sim.assignedCabinId] ?? '—'}</p>
+              {/if}
             </div>
             <div class="text-right">
-              <p class="text-sm font-bold text-slate-900">{sim.current_balance ?? 0} UV</p>
-              <p class="text-xs {sim.is_active ? 'text-emerald-600' : 'text-slate-400'} font-medium">
-                {sim.is_active ? $t('status.active') : $t('status.inactive')}
+              <p class="text-sm font-bold text-slate-900">{sim.currentBalance ?? 0} UV</p>
+              <p class="text-xs {sim.isActive ? 'text-emerald-600' : 'text-slate-400'} font-medium">
+                {sim.isActive ? $t('status.active') : $t('status.inactive')}
               </p>
             </div>
+            <button onclick={() => ouvrirSolde(sim)}
+              class="text-xs px-2 py-1.5 rounded-lg bg-slate-100 text-slate-700 font-semibold hover:bg-slate-200 flex items-center gap-1 shrink-0">
+              <span class="material-symbols-outlined icon-filled" style="font-size:13px">account_balance_wallet</span>
+              Recharger / corriger le solde
+            </button>
           </div>
         {/each}
       </div>
@@ -292,20 +408,31 @@
       <div class="divide-y divide-slate-50">
         {#each historique as tx}
           <div class="flex items-center gap-4 px-5 py-3.5 hover:bg-slate-50 transition-all">
-            <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 {couleurType[tx.transaction_type] ?? 'bg-slate-100 text-slate-600'}">
+            <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 {couleurType[tx.transactionType] ?? 'bg-slate-100 text-slate-600'}">
               <span class="material-symbols-outlined icon-filled" style="font-size:16px">
-                {tx.transaction_type === 'recharge' ? 'add_circle' : tx.transaction_type === 'deduction' ? 'remove_circle' : 'tune'}
+                {tx.transactionType === 'recharge' ? 'add_circle' : tx.transactionType === 'deduction' ? 'remove_circle' : tx.transactionType?.startsWith('sim_') ? 'sim_card' : 'tune'}
               </span>
             </div>
             <div class="flex-1 min-w-0">
-              <p class="text-sm font-semibold text-slate-800">{tx.description ?? tx.transaction_type ?? '—'}</p>
-              <p class="text-xs text-slate-400">{formaterDate(tx.created_at)}</p>
+              {#if !tx.cabinId && tx.simCardId}
+                <p class="text-sm font-semibold text-slate-800">SIM : {nomsSims[tx.simCardId] ?? '—'}</p>
+              {:else}
+                <p class="text-sm font-semibold text-slate-800">{tx.cabinName ?? nomsCabines[tx.cabinId] ?? '—'}</p>
+              {/if}
+              <p class="text-xs text-slate-500">
+                {libellesType[tx.transactionType] ?? 'Mouvement'}{tx.description && tx.description !== libellesType[tx.transactionType] ? ` · ${tx.description}` : ''}
+              </p>
+              <p class="text-xs text-slate-400">{formaterDate(tx.createdAt)}</p>
             </div>
             <div class="text-right shrink-0">
-              <p class="text-sm font-bold {tx.transaction_type === 'recharge' ? 'text-emerald-600' : 'text-red-600'}">
-                {tx.transaction_type === 'recharge' ? '+' : '-'}{tx.amount ?? 0} UV
+              <p class="text-sm font-bold {estCredit(tx) ? 'text-emerald-600' : 'text-red-600'}">
+                {estCredit(tx) ? '+' : '-'}{tx.amount ?? 0} UV
               </p>
-              <p class="text-xs text-slate-400">{tx.balance_after ?? '—'} UV {$t('admin.uv.remaining')}</p>
+              {#if tx.balanceBefore !== null && tx.balanceBefore !== undefined && tx.balanceAfter !== null && tx.balanceAfter !== undefined}
+                <p class="text-xs text-slate-400">{tx.balanceBefore} → {tx.balanceAfter} UV</p>
+              {:else if tx.balanceAfter !== null && tx.balanceAfter !== undefined}
+                <p class="text-xs text-slate-400">{tx.balanceAfter} UV {$t('admin.uv.remaining')}</p>
+              {/if}
             </div>
           </div>
         {/each}
@@ -336,12 +463,12 @@
       <div class="p-6 space-y-4">
         <!-- Résumé demande -->
         <div class="p-4 rounded-xl bg-emerald-50 border border-emerald-100">
-          <p class="text-xs text-emerald-700 font-medium">{$t('admin.cabins.col_cabin')} : {demandeSelectionnee.cabin_name}</p>
-          <p class="text-2xl font-black text-slate-900 mt-1">{demandeSelectionnee.amount_requested} UV</p>
+          <p class="text-xs text-emerald-700 font-medium">{$t('admin.cabins.col_cabin')} : {demandeSelectionnee.cabinName ?? nomsCabines[demandeSelectionnee.cabinId] ?? '—'}</p>
+          <p class="text-2xl font-black text-slate-900 mt-1">{demandeSelectionnee.amountRequested} UV</p>
         </div>
 
         <!-- Preuve de paiement -->
-        {#if demandeSelectionnee.payment_amount}
+        {#if demandeSelectionnee.paymentAmount}
           <div class="rounded-xl border border-slate-200 divide-y divide-slate-100 overflow-hidden">
             <div class="px-4 py-2.5 bg-slate-50">
               <p class="text-xs font-bold text-slate-500 uppercase tracking-wide">Preuve de paiement</p>
@@ -349,19 +476,19 @@
             <div class="grid grid-cols-2 gap-px bg-slate-100">
               <div class="px-4 py-3 bg-white">
                 <p class="text-xs text-slate-400 mb-0.5">Montant payé</p>
-                <p class="text-sm font-bold text-slate-900">{Number(demandeSelectionnee.payment_amount).toLocaleString('fr-CM')} XAF</p>
+                <p class="text-sm font-bold text-slate-900">{Number(demandeSelectionnee.paymentAmount).toLocaleString('fr-CM')} XAF</p>
               </div>
               <div class="px-4 py-3 bg-white">
                 <p class="text-xs text-slate-400 mb-0.5">Opérateur</p>
                 <div class="flex items-center gap-1.5">
-                  <span class="w-2 h-2 rounded-full {demandeSelectionnee.payment_method === 'mtn' ? 'bg-amber-400' : 'bg-orange-500'}"></span>
-                  <p class="text-sm font-bold text-slate-900">{demandeSelectionnee.payment_method === 'mtn' ? 'MTN MoMo' : 'Orange Money'}</p>
+                  <span class="w-2 h-2 rounded-full {demandeSelectionnee.paymentMethod === 'mtn' ? 'bg-amber-400' : 'bg-orange-500'}"></span>
+                  <p class="text-sm font-bold text-slate-900">{demandeSelectionnee.paymentMethod === 'mtn' ? 'MTN MoMo' : 'Orange Money'}</p>
                 </div>
               </div>
-              {#if demandeSelectionnee.payment_phone}
+              {#if demandeSelectionnee.paymentPhone}
                 <div class="px-4 py-3 bg-white col-span-2">
                   <p class="text-xs text-slate-400 mb-0.5">N° Mobile Money de la cabine</p>
-                  <p class="text-sm font-bold font-mono text-slate-900">{demandeSelectionnee.payment_phone}</p>
+                  <p class="text-sm font-bold font-mono text-slate-900">{demandeSelectionnee.paymentPhone}</p>
                 </div>
               {/if}
             </div>
@@ -371,6 +498,12 @@
                 <p class="text-sm text-slate-700">{demandeSelectionnee.notes}</p>
               </div>
             {/if}
+            {#if demandeSelectionnee.paymentReference}
+              <div class="px-4 py-3 bg-white">
+                <p class="text-xs text-slate-400 mb-0.5">Référence</p>
+                <p class="text-sm font-mono text-slate-700">{demandeSelectionnee.paymentReference}</p>
+              </div>
+            {/if}
           </div>
         {/if}
 
@@ -378,10 +511,13 @@
           <label for="sim-card-id" class="block text-xs font-semibold text-slate-600 mb-1.5">{$t('admin.uv.sim_used_optional')}</label>
           <select id="sim-card-id" bind:value={simCardId} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
             <option value="">{$t('admin.uv.no_specific_sim')}</option>
-            {#each simCards as sim}
-              <option value={sim.id}>{sim.card_name} — {sim.phone_number}</option>
+            {#each simCardsValidation as sim}
+              <option value={sim.id}>{sim.cardName} — {sim.phoneNumber} ({sim.currentBalance ?? 0} UV)</option>
             {/each}
           </select>
+          {#if simChoisie && Number(simChoisie.currentBalance ?? 0) < Number(demandeSelectionnee.amountRequested ?? 0)}
+            <p class="text-xs text-red-500 mt-1">Solde de cette SIM insuffisant : {simChoisie.currentBalance ?? 0} UV disponibles pour {demandeSelectionnee.amountRequested} demandés.</p>
+          {/if}
         </div>
         <div class="flex gap-3">
           <button onclick={() => afficherModalValider = false} class="btn-secondary flex-1">{$t('common.cancel')}</button>
@@ -452,12 +588,24 @@
           <input id="sim-name" type="text" bind:value={formSim.cardName} placeholder="Ex: SIM MTN Principale" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
         </div>
         <div>
+          <label for="sim-solde" class="block text-xs font-semibold text-slate-600 mb-1.5">Solde initial (UV)</label>
+          <input id="sim-solde" type="number" min="0" step="1" bind:value={formSim.currentBalance} placeholder="0" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
+          {#if !soldeInitialValide}
+            <p class="text-xs text-red-500 mt-1">Le solde initial doit être un nombre entier positif ou nul.</p>
+          {:else}
+            <p class="text-xs text-slate-400 mt-1">Solde réel de la SIM au moment de son ajout. Laisser vide pour 0.</p>
+          {/if}
+        </div>
+        <div>
           <label for="sim-cabin" class="block text-xs font-semibold text-slate-600 mb-1.5">{$t('admin.uv.assigned_cabin_optional')}</label>
-          <input id="sim-cabin" type="text" bind:value={formSim.assignedCabinId} placeholder="{$t('form.cabin_id_placeholder')}" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
+          <select id="sim-cabin" bind:value={formSim.assignedCabinId} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
+            <option value="">—</option>
+            {#each cabines as c}<option value={c.id}>{c.name}{c.city ? ` — ${c.city}` : ''}</option>{/each}
+          </select>
         </div>
         <div class="flex gap-3">
           <button onclick={() => afficherModalSim = false} class="btn-secondary flex-1">{$t('common.cancel')}</button>
-          <button onclick={creerSimCard} disabled={!formSim.cardName || !formSim.phoneNumber || actionEnCours === 'sim'} class="btn-primary flex-1 justify-center">
+          <button onclick={creerSimCard} disabled={!formSim.cardName || !formSim.phoneNumber || !soldeInitialValide || actionEnCours === 'sim'} class="btn-primary flex-1 justify-center">
             {#if actionEnCours === 'sim'}<span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>{:else}
               <span class="material-symbols-outlined icon-filled" style="font-size:16px">add</span>{$t('common.create')}
             {/if}
@@ -468,3 +616,60 @@
   </div>
 {/if}
 
+
+{#if afficherModalSolde && simSelectionnee}
+  <div class="fixed inset-0 z-50 grid place-items-center min-h-screen p-4 pointer-events-none">
+    <div class="bg-white rounded-2xl w-full max-w-md pointer-events-auto animate-fade-in-up" style="box-shadow: 0 25px 60px rgba(0,0,0,0.18), 0 8px 24px rgba(0,0,0,0.10);">
+      <div class="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
+        <h3 class="font-bold text-slate-900">Recharger / corriger le solde</h3>
+        <button onclick={() => afficherModalSolde = false} class="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400">
+          <span class="material-symbols-outlined" style="font-size:18px">close</span>
+        </button>
+      </div>
+      <div class="p-6 space-y-4">
+        <div class="p-4 rounded-xl bg-slate-50 border border-slate-100">
+          <p class="text-xs text-slate-500 font-medium">{simSelectionnee.cardName ?? '—'} · {simSelectionnee.phoneNumber ?? '—'}</p>
+          <p class="text-2xl font-black text-slate-900 mt-1">{simSelectionnee.currentBalance ?? 0} UV</p>
+          <p class="text-xs text-slate-400">Solde actuel</p>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <button onclick={() => formSolde.sens = 'recharge'}
+            class="px-3 py-2.5 rounded-xl border text-sm font-semibold flex items-center justify-center gap-1.5 {formSolde.sens === 'recharge' ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}">
+            <span class="material-symbols-outlined icon-filled" style="font-size:16px">add_circle</span>
+            Recharge (ajouter)
+          </button>
+          <button onclick={() => formSolde.sens = 'correction'}
+            class="px-3 py-2.5 rounded-xl border text-sm font-semibold flex items-center justify-center gap-1.5 {formSolde.sens === 'correction' ? 'border-red-300 bg-red-50 text-red-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}">
+            <span class="material-symbols-outlined icon-filled" style="font-size:16px">remove_circle</span>
+            Correction (retirer)
+          </button>
+        </div>
+        <div>
+          <label for="solde-montant" class="block text-xs font-semibold text-slate-600 mb-1.5">Nombre d'UV *</label>
+          <input id="solde-montant" type="number" min="1" step="1" bind:value={formSolde.montant} placeholder="Ex : 5000" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
+        </div>
+        <div>
+          <label for="solde-description" class="block text-xs font-semibold text-slate-600 mb-1.5">Motif *</label>
+          <input id="solde-description" type="text" bind:value={formSolde.description} maxlength="255" placeholder={formSolde.sens === 'recharge' ? 'Ex : Achat UV MTN' : 'Ex : Écart constaté lors du contrôle'} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
+        </div>
+        {#if deltaSolde}
+          <div class="p-3 rounded-xl border text-sm {nouveauSolde < 0 ? 'bg-red-50 border-red-200 text-red-700' : 'bg-emerald-50 border-emerald-100 text-emerald-800'}">
+            {#if nouveauSolde < 0}
+              Correction impossible : le solde deviendrait négatif ({nouveauSolde} UV).
+            {:else}
+              Nouveau solde : <span class="font-bold">{simSelectionnee.currentBalance ?? 0} {deltaSolde > 0 ? '+' : '−'} {Math.abs(deltaSolde)} = {nouveauSolde} UV</span>
+            {/if}
+          </div>
+        {/if}
+        <div class="flex gap-3">
+          <button onclick={() => afficherModalSolde = false} class="btn-secondary flex-1">{$t('common.cancel')}</button>
+          <button onclick={ajusterSolde} disabled={!deltaSolde || nouveauSolde < 0 || formSolde.description.trim().length < 2 || actionEnCours === 'solde'} class="btn-primary flex-1 justify-center">
+            {#if actionEnCours === 'solde'}<span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>{:else}
+              <span class="material-symbols-outlined icon-filled" style="font-size:16px">check_circle</span>Enregistrer
+            {/if}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}

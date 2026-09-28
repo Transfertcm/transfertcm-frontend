@@ -6,8 +6,17 @@
   import { toast } from '$lib/stores/toast.svelte'
   import Badge from '$lib/components/ui/Badge.svelte'
   import StatCard from '$lib/components/ui/StatCard.svelte'
+  import { t } from '$lib/stores/locale'
+  import { auth } from '$lib/stores/auth.svelte'
 
   const id = $derived($page.params.id)
+  const peutGerer = $derived(auth.peut('canManageCabins'))
+
+  const canauxNotification: Record<string, string> = {
+    sms: 'SMS',
+    whatsapp: 'WhatsApp',
+    push: 'Notification push',
+  }
 
   let cabine = $state<any>(null)
   let stats = $state<any>(null)
@@ -34,11 +43,16 @@
   let descriptionUV = $state('')
   let durationMois = $state(1)
   let form = $state<any>({})
+  let sansLimiteMontant = $state(false)
 
   function formaterDate(d: string | null) {
     if (!d) return '—'
     return new Date(d).toLocaleDateString('fr-CM', { day: 'numeric', month: 'long', year: 'numeric' })
   }
+
+  const expirationDepassee = $derived(
+    !!cabine?.subscriptionExpiry && new Date(cabine.subscriptionExpiry).getTime() < Date.now()
+  )
 
   function formaterMontant(n: any) {
     const num = Number(n)
@@ -86,12 +100,13 @@
       form = {
         name: cabine.name, managerName: cabine.managerName ?? cabine.manager_name,
         email: cabine.email, phone: cabine.phone, city: cabine.city,
-        location: cabine.location, type: cabine.type,
-        mtnNumber: cabine.mtnNumber ?? cabine.mtn_number,
-        orangeNumber: cabine.orangeNumber ?? cabine.orange_number,
-        maxDailyOrders: cabine.maxDailyOrders ?? cabine.max_daily_orders,
-        maxOrderAmount: cabine.maxOrderAmount ?? cabine.max_order_amount,
+        location: cabine.location,
+        mtnNumber: cabine.mtnNumber,
+        orangeNumber: cabine.orangeNumber,
+        maxDailyOrders: cabine.maxDailyOrders,
+        maxOrderAmount: cabine.maxOrderAmount,
       }
+      sansLimiteMontant = cabine.maxOrderAmount === null || cabine.maxOrderAmount === undefined
     } catch {
       toast.erreur('Erreur', 'Cabine introuvable')
       goto('/admin/cabines')
@@ -181,12 +196,22 @@
   async function sauvegarder() {
     actionEnCours = 'editer'
     try {
-      await api.put(`/cabins/${id}`, form)
+      const payload: any = {}
+      for (const [cle, val] of Object.entries(form)) {
+        if (val === null || val === undefined || val === '') continue
+        payload[cle] = ['phone', 'mtnNumber', 'orangeNumber'].includes(cle) ? String(val).replace(/[\s\-]/g, '') : val
+      }
+      if (payload.maxDailyOrders !== undefined) payload.maxDailyOrders = Number(payload.maxDailyOrders)
+      if (payload.maxOrderAmount !== undefined) payload.maxOrderAmount = Number(payload.maxOrderAmount)
+      if (sansLimiteMontant) payload.maxOrderAmount = null
+      await api.put(`/cabins/${id}`, payload)
       toast.succes('Cabine mise à jour')
       afficherModalEditer = false
       await charger()
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de sauvegarder')
+      const erreurs = e.response?.data?.errors
+      const detail = Array.isArray(erreurs) && erreurs.length ? erreurs.map((x: any) => x.message).join(' • ') : null
+      toast.erreur('Erreur', detail ?? e.response?.data?.message ?? 'Impossible de sauvegarder')
     } finally { actionEnCours = '' }
   }
 
@@ -213,7 +238,8 @@
   </div>
   {#if cabine}
     <div class="flex items-center gap-2 flex-wrap">
-      <Badge statut={cabine.status ?? 'inactive'} />
+      <Badge statut={cabine.paused && cabine.status === 'active' ? 'paused' : (cabine.status ?? 'inactive')} />
+      {#if peutGerer}
       <button onclick={() => afficherModalEditer = true} class="btn-secondary">
         <span class="material-symbols-outlined icon-filled" style="font-size:16px">edit</span>
         Modifier
@@ -248,6 +274,7 @@
           Réactiver
         </button>
       {/if}
+      {/if}
     </div>
   {/if}
 </div>
@@ -268,7 +295,8 @@
       sousTitre="Max : {cabine.maxDailyOrders ?? cabine.max_daily_orders ?? '∞'}" />
     <StatCard titre="Solde UV" valeur={cabine.uvBalance ?? cabine.uv_balance ?? 0} icone="bolt" couleur="jaune" />
     <StatCard titre="Total commandes" valeur={stats?.totals?.total ?? '—'} icone="bar_chart" couleur="bleu" />
-    <StatCard titre="Chiffre d'affaires" valeur={stats?.totals?.total_amount ? (Number(stats.totals.total_amount) / 1000).toFixed(0) + ' K XAF' : '—'} icone="payments" couleur="vert" />
+    <StatCard titre="Chiffre d'affaires" valeur={stats?.totals ? formaterMontant(stats.totals.totalAmount ?? 0) : '—'} icone="payments" couleur="vert"
+      sousTitre={stats?.totals ? `Commandes complétées et payées${stats.totals.feesCollected !== undefined ? ` · Frais perçus : ${formaterMontant(stats.totals.feesCollected)}` : ''}` : ''} />
   </div>
 
   <div class="grid grid-cols-1 lg:grid-cols-3 stagger gap-5">
@@ -288,7 +316,7 @@
           {#each [
             { label: 'Nom', val: cabine.name },
             { label: 'Responsable', val: cabine.managerName ?? cabine.manager_name },
-            { label: 'Type', val: cabine.type },
+            { label: 'Type', val: cabine.type ? $t(`admin.cabins.type.${cabine.type}`) : null },
             { label: 'Email', val: cabine.email },
             { label: 'Téléphone', val: cabine.phone },
             { label: 'Ville', val: cabine.city },
@@ -298,7 +326,7 @@
             {#if info.val}
               <div>
                 <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">{info.label}</p>
-                <p class="text-sm font-semibold text-slate-800 capitalize">{info.val}</p>
+                <p class="text-sm font-semibold text-slate-800 break-words">{info.val}</p>
               </div>
             {/if}
           {/each}
@@ -355,22 +383,20 @@
             <p class="text-sm font-bold text-slate-900">{cabine.maxDailyOrders ?? cabine.max_daily_orders ?? '—'}</p>
           </div>
           <div>
-            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Montant max/commande</p>
-            <p class="text-sm font-bold text-slate-900">{formaterMontant(cabine.maxOrderAmount ?? cabine.max_order_amount)}</p>
+            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Montant max par commande</p>
+            <p class="text-sm font-bold text-slate-900">{cabine.maxOrderAmount ? formaterMontant(cabine.maxOrderAmount) : 'Aucune limite'}</p>
           </div>
           <div>
-            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Quota total</p>
-            <p class="text-sm font-bold text-slate-900">{cabine.totalOrdersQuota ?? cabine.total_orders_quota ?? '—'}</p>
+            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Quota de commandes</p>
+            <p class="text-sm font-bold text-slate-900">{cabine.totalOrdersQuota ? cabine.totalOrdersQuota : 'Aucun'}</p>
           </div>
           <div>
-            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Quota bloqué</p>
-            <p class="text-sm font-semibold {(cabine.quotaBlocked ?? cabine.quota_blocked) ? 'text-red-600' : 'text-emerald-600'}">
-              {(cabine.quotaBlocked ?? cabine.quota_blocked) ? 'Oui' : 'Non'}
-            </p>
+            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Blocage quota</p>
+            <p class="text-sm font-bold {cabine.quotaBlocked ? 'text-red-600' : 'text-slate-900'}">{cabine.quotaBlocked ? 'Bloquée (quota atteint)' : 'Non bloquée'}</p>
           </div>
           <div>
-            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Notification</p>
-            <p class="text-sm font-semibold text-slate-800 capitalize">{cabine.notificationType ?? cabine.notification_type ?? '—'}</p>
+            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Canal de notification</p>
+            <p class="text-sm font-bold text-slate-900">{cabine.notificationType ? (canauxNotification[cabine.notificationType] ?? cabine.notificationType) : '—'}</p>
           </div>
         </div>
         <!-- Barre de progression quotidienne -->
@@ -399,7 +425,7 @@
           <div class="p-5 grid grid-cols-2 sm:grid-cols-3 gap-3">
             {#each stats.byStatus as s}
               <div class="p-3 rounded-xl bg-slate-50 border border-slate-100">
-                <p class="text-xs text-slate-400 capitalize mb-1">{(s.status ?? '').replace(/_/g, ' ')}</p>
+                <p class="text-xs text-slate-400 mb-1">{$t(`status.${s.status}`)}</p>
                 <p class="text-lg font-black text-slate-900">{s.count}</p>
               </div>
             {/each}
@@ -426,21 +452,27 @@
           </div>
           <div class="flex justify-between">
             <span class="text-sm text-slate-500">Expiration</span>
-            <span class="text-sm font-semibold text-slate-800">{formaterDate(cabine.subscriptionExpiry ?? cabine.subscription_expiry)}</span>
+            <span class="text-sm font-semibold {expirationDepassee ? 'text-red-600' : 'text-slate-800'}">{formaterDate(cabine.subscriptionExpiry)}</span>
           </div>
-          <div class="flex justify-between">
-            <span class="text-sm text-slate-500">Renouvellement auto</span>
-            <span class="text-sm font-semibold {cabine.autoRenew ?? cabine.auto_renew ? 'text-emerald-600' : 'text-slate-400'}">
-              {cabine.autoRenew ?? cabine.auto_renew ? 'Activé' : 'Désactivé'}
-            </span>
-          </div>
+          {#if expirationDepassee}
+            <p class="text-xs text-red-600">La date d'expiration est dépassée.</p>
+          {/if}
+          {#if cabine.autoRenew !== undefined && cabine.autoRenew !== null}
+            <div class="flex justify-between">
+              <span class="text-sm text-slate-500">Renouvellement auto.</span>
+              <span class="text-sm font-semibold text-slate-800">{cabine.autoRenew ? 'Activé' : 'Désactivé'}</span>
+            </div>
+            <p class="text-[11px] text-slate-400">Information seulement : aucun renouvellement n'est effectué automatiquement.</p>
+          {/if}
           {#if (cabine.subscriptionStatus ?? cabine.subscription_status ?? 'inactive') !== 'active'}
+            {#if peutGerer}
             <button onclick={() => afficherModalActiverAbo = true}
               class="w-full mt-1 px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 flex items-center justify-center gap-1.5">
               <span class="material-symbols-outlined icon-filled" style="font-size:16px">check_circle</span>
               Activer l'abonnement
             </button>
-          {:else}
+            {/if}
+          {:else if auth.peut('canManageSubscriptions')}
             <a href="/admin/abonnements?cabin={id}" class="block text-center text-xs text-orange-500 font-semibold hover:text-orange-600 mt-2">
               Gérer l'abonnement →
             </a>
@@ -448,19 +480,23 @@
         </div>
       </div>
 
-      <!-- Suspension / Pause -->
-      {#if cabine.suspensionReason ?? cabine.suspension_reason}
+      {#if cabine.status === 'suspended'}
         <div class="bg-red-50 border border-red-200 rounded-2xl p-5">
-          <p class="text-xs font-bold text-red-700 uppercase tracking-wide mb-2">Raison de suspension</p>
-          <p class="text-sm text-red-700">{cabine.suspensionReason ?? cabine.suspension_reason}</p>
-          <p class="text-xs text-red-500 mt-2">Le {formaterDate(cabine.suspensionDate ?? cabine.suspension_date)}</p>
+          <p class="text-xs font-bold text-red-700 uppercase tracking-wide mb-2">Suspendue</p>
+          <p class="text-sm text-red-700">{cabine.suspensionReason ?? 'Aucune raison indiquée'}</p>
+          {#if cabine.suspensionDate}
+            <p class="text-xs text-red-600 mt-2">Depuis le {formaterDate(cabine.suspensionDate)}</p>
+          {/if}
         </div>
       {/if}
-      {#if cabine.paused && (cabine.pauseReason ?? cabine.pause_reason)}
+
+      {#if cabine.paused}
         <div class="bg-amber-50 border border-amber-200 rounded-2xl p-5">
           <p class="text-xs font-bold text-amber-700 uppercase tracking-wide mb-2">En pause</p>
-          <p class="text-sm text-amber-700">{cabine.pauseReason ?? cabine.pause_reason}</p>
-          <p class="text-xs text-amber-500 mt-2">Depuis le {formaterDate(cabine.pausedAt ?? cabine.paused_at)}</p>
+          <p class="text-sm text-amber-700">{cabine.pauseReason ?? 'Aucune raison indiquée'}</p>
+          {#if cabine.pausedAt}
+            <p class="text-xs text-amber-600 mt-2">Depuis le {formaterDate(cabine.pausedAt)}</p>
+          {/if}
         </div>
       {/if}
 
@@ -515,7 +551,7 @@
                   <span class="text-sm font-semibold text-slate-800">{formaterDate(idCard.submittedAt)}</span>
                 </div>
               {/if}
-              {#if idCard.status === 'pending'}
+              {#if idCard.status === 'pending' && peutGerer}
                 <div class="flex gap-2 mt-1">
                   <button onclick={() => reviewDocument('approve')} disabled={chargementDoc}
                     class="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 disabled:opacity-50">
@@ -550,16 +586,17 @@
             <span class="text-slate-500">Dernière activité</span>
             <span class="font-semibold text-slate-800">{formaterDate(cabine.lastActivity ?? cabine.last_activity)}</span>
           </div>
-          {#if cabine.reactivatedAt ?? cabine.reactivated_at}
+          {#if cabine.reactivatedAt}
             <div class="flex justify-between">
-              <span class="text-slate-500">Réactivée le</span>
-              <span class="font-semibold text-slate-800">{formaterDate(cabine.reactivatedAt ?? cabine.reactivated_at)}</span>
+              <span class="text-slate-500">Dernière réactivation</span>
+              <span class="font-semibold text-slate-800">{formaterDate(cabine.reactivatedAt)}</span>
             </div>
           {/if}
         </div>
       </div>
 
       <!-- Lien commandes -->
+      {#if auth.peut('canViewOrders')}
       <a href="/admin/commandes?cabin={id}" class="flex items-center gap-3 bg-white rounded-2xl border border-slate-100 card-shadow p-4 hover:border-orange-200 transition-all group">
         <div class="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center shrink-0">
           <span class="material-symbols-outlined text-orange-500 icon-filled" style="font-size:20px">receipt_long</span>
@@ -570,6 +607,7 @@
         </div>
         <span class="material-symbols-outlined text-slate-300 group-hover:text-orange-400 transition-colors" style="font-size:18px">chevron_right</span>
       </a>
+      {/if}
     </div>
   </div>
 {/if}
@@ -772,7 +810,7 @@
           </div>
         </div>
 
-        {#if idCard.status === 'pending'}
+        {#if idCard.status === 'pending' && peutGerer}
           <!-- Actions -->
           <div class="border-t border-slate-100 pt-5">
             <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-4">Décision</p>
@@ -859,12 +897,8 @@
             <input id="edit-city" type="text" bind:value={form.city} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
           </div>
           <div>
-            <label for="edit-type" class="block text-xs font-semibold text-slate-600 mb-1.5">Type</label>
-            <select id="edit-type" bind:value={form.type} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
-              <option value="basic">Basic</option>
-              <option value="standard">Standard</option>
-              <option value="premium">Premium</option>
-            </select>
+            <label for="edit-location" class="block text-xs font-semibold text-slate-600 mb-1.5">Localisation</label>
+            <input id="edit-location" type="text" bind:value={form.location} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
           </div>
         </div>
         <div class="grid grid-cols-2 gap-4">
@@ -880,11 +914,22 @@
         <div class="grid grid-cols-2 gap-4">
           <div>
             <label for="edit-maxorders" class="block text-xs font-semibold text-slate-600 mb-1.5">Max commandes/jour</label>
-            <input id="edit-maxorders" type="number" bind:value={form.maxDailyOrders} min="1" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
+            <input id="edit-maxorders" type="number" bind:value={form.maxDailyOrders} min="1" max="500" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
           </div>
           <div>
-            <label for="edit-maxamount" class="block text-xs font-semibold text-slate-600 mb-1.5">Montant max (XAF)</label>
-            <input id="edit-maxamount" type="number" bind:value={form.maxOrderAmount} min="0" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
+            <label for="edit-maxamount" class="block text-xs font-semibold text-slate-600 mb-1.5">Montant max par commande (XAF)</label>
+            <input id="edit-maxamount" type="number" bind:value={form.maxOrderAmount} min="100" disabled={sansLimiteMontant} placeholder={sansLimiteMontant ? 'Aucune limite' : 'Ex : 50000'} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm disabled:bg-slate-50 disabled:text-slate-400" />
+            <label class="flex items-center gap-2 mt-1.5 text-xs text-slate-600 cursor-pointer">
+              <input type="checkbox" bind:checked={sansLimiteMontant} class="rounded border-slate-300" />
+              Aucune limite
+            </label>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <p class="block text-xs font-semibold text-slate-600 mb-1.5">Type</p>
+            <p class="px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-100 text-sm text-slate-600">{cabine?.type ? $t(`admin.cabins.type.${cabine.type}`) : '—'}</p>
+            <p class="text-[11px] text-slate-400 mt-1">Non modifiable après la création.</p>
           </div>
         </div>
         <div class="flex gap-3 pt-2">

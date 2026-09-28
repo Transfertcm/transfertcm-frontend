@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { untrack } from 'svelte'
   import api from '$lib/api'
   import { toast } from '$lib/stores/toast.svelte'
 
@@ -25,8 +25,7 @@
     chargement = true
     try {
       const res = await api.get('/admin/cabin-remunerations/performances', { params: { date } })
-      const raw = res.data
-      perf = Array.isArray(raw) ? raw : (Array.isArray(raw?.data) ? raw.data : [])
+      perf = res.data?.data ?? []
     } catch {
       perf = []
     } finally {
@@ -57,16 +56,15 @@
       modalPay = false
       await charger()
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible d\'enregistrer')
+      const champs = e.response?.data?.errors
+      const detail = Array.isArray(champs) && champs.length ? champs.map((x: any) => x.message).join(' ') : null
+      if (!e.toastAffiche) toast.erreur('Erreur', detail ?? e.response?.data?.message ?? 'Impossible d\'enregistrer')
     } finally {
       payEnCours = false
     }
   }
 
-  let mounted = false
-  onMount(() => { mounted = true; charger() })
-  // Recharger uniquement quand date change (après le mount initial)
-  $effect(() => { if (mounted) { date; charger() } })
+  $effect(() => { date; untrack(charger) })
 </script>
 
 <svelte:head><title>Rémunérations cabines — Admin</title></svelte:head>
@@ -75,7 +73,7 @@
 <div class="mb-6 flex items-center justify-between flex-wrap gap-3">
   <div>
     <h2 class="font-black text-2xl text-slate-900" style="letter-spacing:-0.02em">Rémunérations cabines</h2>
-    <p class="text-sm text-slate-500 mt-0.5">Chiffre du jour par cabine · Enregistrez les paiements</p>
+    <p class="text-sm text-slate-500 mt-0.5">Commandes traitées du jour par cabine (assignées, en cours ou terminées) · Enregistrez les paiements</p>
   </div>
   <div class="flex items-center gap-3">
     <input
@@ -99,7 +97,7 @@
     <div class="bg-white rounded-2xl p-5 border border-slate-100 card-shadow">
       <p class="text-xs text-slate-400 uppercase tracking-wide mb-1">Volume total traité</p>
       <p class="font-black text-2xl text-slate-900">{formaterMontant(totalVolume)}</p>
-      <p class="text-xs text-slate-400 mt-1">{totalOrders} commandes complétées</p>
+      <p class="text-xs text-slate-400 mt-1">{totalOrders} commande{totalOrders > 1 ? 's' : ''} traitée{totalOrders > 1 ? 's' : ''} (assignées, en cours ou terminées)</p>
     </div>
     <div class="bg-white rounded-2xl p-5 border border-slate-100 card-shadow">
       <p class="text-xs text-slate-400 uppercase tracking-wide mb-1">Cabines actives</p>
@@ -130,7 +128,7 @@
   {:else if perf.length === 0}
     <div class="py-20 text-center">
       <span class="material-symbols-outlined text-slate-300" style="font-size:40px">store_off</span>
-      <p class="text-slate-500 font-semibold mt-3">Aucune commande complétée ce jour</p>
+      <p class="text-slate-500 font-semibold mt-3">Aucune commande traitée ce jour</p>
       <p class="text-slate-400 text-sm mt-1">Aucune cabine n'a de chiffre à payer pour le {date}</p>
     </div>
   {:else}

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte'
+  import { tick } from 'svelte'
   import api from '$lib/api'
   import { toast } from '$lib/stores/toast.svelte'
 
@@ -31,8 +31,7 @@
       const params: any = {}
       if (filtreStatut) params.status = filtreStatut
       const res = await api.get('/support/conversations', { params })
-      const d = res.data?.data
-      conversations = d?.data ?? d ?? []
+      conversations = Array.isArray(res.data?.data) ? res.data.data : []
     } catch { toast.erreur('Erreur', 'Impossible de charger les conversations') }
     finally { chargement = false }
   }
@@ -43,8 +42,8 @@
     messages = []
     try {
       const res = await api.get(`/support/conversations/${conv.id}/messages`)
-      const d = res.data?.data
-      messages = d?.data ?? d ?? []
+      messages = Array.isArray(res.data?.data) ? res.data.data : []
+      conversations = conversations.map(c => c.id === conv.id ? { ...c, unreadByAdmin: 0 } : c)
       await tick()
       zoneMessages?.scrollTo({ top: zoneMessages.scrollHeight, behavior: 'smooth' })
     } catch { toast.erreur('Erreur', 'Impossible de charger les messages') }
@@ -55,13 +54,20 @@
     if (!contenu.trim() || !convActive) return
     envoi = true
     try {
-      const res = await api.post(`/support/conversations/${convActive.id}/messages`, { content: contenu })
-      messages = [...messages, res.data?.data]
+      const conv = convActive
+      const res = await api.post(`/support/conversations/${conv.id}/messages`, { content: contenu })
+      const envoye = res.data?.data
       contenu = ''
+      if (envoye?.id) {
+        messages = [...messages, envoye]
+      } else {
+        const rechargement = await api.get(`/support/conversations/${conv.id}/messages`)
+        messages = Array.isArray(rechargement.data?.data) ? rechargement.data.data : messages
+      }
       await tick()
       zoneMessages?.scrollTo({ top: zoneMessages.scrollHeight, behavior: 'smooth' })
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? "Impossible d'envoyer")
+      toast.erreur('Erreur', e.response?.data?.errors?.[0]?.message ?? e.response?.data?.message ?? "Impossible d'envoyer")
     } finally { envoi = false }
   }
 
@@ -74,12 +80,11 @@
       convActive = { ...convActive, status: 'resolved' }
       conversations = conversations.map(c => c.id === convActive.id ? { ...c, status: 'resolved' } : c)
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de résoudre')
+      toast.erreur('Erreur', e.response?.data?.errors?.[0]?.message ?? e.response?.data?.message ?? 'Impossible de résoudre')
     } finally { resolutionEnCours = false }
   }
 
   $effect(() => { filtreStatut; charger() })
-  onMount(charger)
 
   const configStatut: Record<string, { label: string; classe: string }> = {
     open:     { label: 'Ouvert',   classe: 'bg-blue-100 text-blue-700' },
@@ -130,23 +135,23 @@
               class="w-full flex items-start gap-3 px-4 py-3 hover:bg-slate-50 transition-all text-left border-b border-slate-50
                 {convActive?.id === conv.id ? 'bg-orange-50 border-l-2 border-l-orange-500' : ''}">
               <div class="w-9 h-9 rounded-full bg-gradient-to-br from-orange-400 to-amber-400 flex items-center justify-center text-white text-sm font-bold shrink-0">
-                {(conv.client_name ?? conv.client_phone ?? '?')[0].toUpperCase()}
+                {String(conv.clientName || conv.clientPhone || '?')[0].toUpperCase()}
               </div>
               <div class="flex-1 min-w-0">
                 <div class="flex items-center justify-between gap-1 mb-0.5">
                   <p class="text-sm font-semibold text-slate-800 truncate">
-                    {conv.client_name ?? conv.client_phone ?? 'Client'}
+                    {conv.clientName || conv.clientPhone || 'Client'}
                   </p>
                   <span class="text-xs px-1.5 py-0.5 rounded-full {cfg.classe} shrink-0">{cfg.label}</span>
                 </div>
-                {#if conv.last_message_preview}
-                  <p class="text-xs text-slate-400 truncate">{conv.last_message_preview}</p>
+                {#if conv.lastMessagePreview}
+                  <p class="text-xs text-slate-400 truncate">{conv.lastMessagePreview}</p>
                 {/if}
                 <div class="flex items-center justify-between mt-1">
-                  <p class="text-xs text-slate-400">{formaterHeure(conv.last_message_at)}</p>
-                  {#if (conv.unread_by_admin ?? 0) > 0}
+                  <p class="text-xs text-slate-400">{formaterHeure(conv.lastMessageAt)}</p>
+                  {#if (conv.unreadByAdmin ?? 0) > 0}
                     <span class="w-4 h-4 rounded-full bg-orange-500 text-white text-[9px] font-bold flex items-center justify-center">
-                      {conv.unread_by_admin}
+                      {conv.unreadByAdmin}
                     </span>
                   {/if}
                 </div>
@@ -168,13 +173,13 @@
               <span class="material-symbols-outlined" style="font-size:18px">arrow_back</span>
             </button>
             <div class="w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-amber-400 flex items-center justify-center text-white text-sm font-bold">
-              {(convActive.client_name ?? convActive.client_phone ?? '?')[0].toUpperCase()}
+              {String(convActive.clientName || convActive.clientPhone || '?')[0].toUpperCase()}
             </div>
             <div>
               <p class="font-semibold text-slate-900 text-sm leading-tight">
-                {convActive.client_name ?? 'Client'}
+                {convActive.clientName || 'Client'}
               </p>
-              <p class="text-xs text-slate-400 font-mono">{convActive.client_phone ?? '—'}</p>
+              <p class="text-xs text-slate-400 font-mono">{convActive.clientPhone ?? '—'}</p>
             </div>
           </div>
           {#if convActive.status === 'open'}
@@ -210,17 +215,17 @@
             </div>
           {:else}
             {#each messages as msg}
-              {@const estAdmin = msg.sender_type === 'admin'}
+              {@const estAdmin = msg.senderType === 'admin'}
               <div class="flex {estAdmin ? 'justify-end' : 'justify-start'}">
                 <div class="max-w-xs lg:max-w-md">
                   {#if !estAdmin}
-                    <p class="text-xs text-slate-400 mb-1 ml-1">{msg.sender_id ?? 'Client'}</p>
+                    <p class="text-xs text-slate-400 mb-1 ml-1">{convActive.clientName || msg.senderId || 'Client'}</p>
                   {/if}
                   <div class="px-4 py-2.5 rounded-2xl text-sm
                     {estAdmin ? 'bg-orange-500 text-white rounded-br-sm' : 'bg-slate-100 text-slate-800 rounded-bl-sm'}">
                     <p>{msg.content}</p>
                     <p class="text-xs mt-1 {estAdmin ? 'text-orange-100' : 'text-slate-400'} text-right">
-                      {formaterHeure(msg.created_at)}
+                      {formaterHeure(msg.createdAt)}
                     </p>
                   </div>
                 </div>

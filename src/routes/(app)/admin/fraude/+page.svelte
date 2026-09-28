@@ -20,17 +20,21 @@
   let resultVerif = $state<any>(null)
   let verificationEnCours = $state(false)
 
-  // Vérification reçu
-  let imageUrl = $state('')
-  let montantAttendu = $state('')
-  let phoneAttendu = $state('')
-  let orderId = $state('')
-  let resultRecu = $state<any>(null)
-  let verificationRecuEnCours = $state(false)
-
   // Modal ajout blacklist
   let afficherModalAjout = $state(false)
   let formBl = $state({ phone: '', reason: '', expiresInDays: '' })
+
+  const regexTelephone = /^(\+?237)?6\d{8}$/
+
+  function telephoneValide(p: string) {
+    return regexTelephone.test(p.replace(/\s/g, ''))
+  }
+
+  const libellesRecommandation: Record<string, string> = {
+    allow: 'Autoriser',
+    review: 'À vérifier manuellement',
+    block: 'Bloquer',
+  }
 
   function formaterDate(d: string | null) {
     if (!d) return '—'
@@ -44,20 +48,27 @@
         api.get('/admin/fraud/blacklist', { params: { page: pageBl, per_page: 20 } }),
         api.get('/admin/fraud/stats'),
       ])
-      const d = blRes.data?.data
-      blacklist = d?.data ?? d ?? []
-      metaBl = d?.meta ?? null
+      blacklist = Array.isArray(blRes.data?.data) ? blRes.data.data : []
+      metaBl = blRes.data?.meta ?? null
       stats = statsRes.data?.data ?? null
     } catch { toast.erreur(translate('toast.error'), translate('common.error_load')) }
     finally { chargement = false }
   }
 
   async function ajouterBlacklist() {
+    if (!telephoneValide(formBl.phone)) {
+      toast.erreur(translate('toast.error'), 'Numéro camerounais invalide (9 chiffres commençant par 6)')
+      return
+    }
+    if (formBl.reason.trim().length < 5) {
+      toast.erreur(translate('toast.error'), 'La raison doit contenir au moins 5 caractères')
+      return
+    }
     actionEnCours = 'ajouter'
     try {
       await api.post('/admin/fraud/blacklist', {
-        phone: formBl.phone,
-        reason: formBl.reason,
+        phone: formBl.phone.replace(/\s/g, ''),
+        reason: formBl.reason.trim(),
         expiresInDays: formBl.expiresInDays ? Number(formBl.expiresInDays) : undefined,
       })
       toast.succes(translate('admin.fraud.blocked'), formBl.phone)
@@ -65,7 +76,7 @@
       formBl = { phone: '', reason: '', expiresInDays: '' }
       await charger()
     } catch (e: any) {
-      toast.erreur(translate('toast.error'), e.response?.data?.message ?? translate('common.error_save'))
+      toast.erreur(translate('toast.error'), e.response?.data?.errors?.[0]?.message ?? e.response?.data?.message ?? translate('common.error_save'))
     } finally { actionEnCours = '' }
   }
 
@@ -76,37 +87,24 @@
       toast.succes(translate('admin.fraud.unblocked'))
       await charger()
     } catch (e: any) {
-      toast.erreur(translate('toast.error'), e.response?.data?.message ?? translate('common.error_save'))
+      toast.erreur(translate('toast.error'), e.response?.data?.errors?.[0]?.message ?? e.response?.data?.message ?? translate('common.error_save'))
     } finally { actionEnCours = '' }
   }
 
   async function verifierTelephone() {
     if (!phoneAVerifier) return
+    if (!telephoneValide(phoneAVerifier)) {
+      toast.erreur(translate('toast.error'), 'Numéro camerounais invalide (9 chiffres commençant par 6)')
+      return
+    }
     verificationEnCours = true
     resultVerif = null
     try {
-      const res = await api.post('/admin/fraud/check-phone', { phone: phoneAVerifier })
+      const res = await api.post('/admin/fraud/check-phone', { phone: phoneAVerifier.replace(/\s/g, '') })
       resultVerif = res.data?.data ?? null
     } catch (e: any) {
-      toast.erreur(translate('toast.error'), e.response?.data?.message ?? translate('common.error_save'))
+      toast.erreur(translate('toast.error'), e.response?.data?.errors?.[0]?.message ?? e.response?.data?.message ?? translate('common.error_save'))
     } finally { verificationEnCours = false }
-  }
-
-  async function verifierRecu() {
-    if (!imageUrl) return
-    verificationRecuEnCours = true
-    resultRecu = null
-    try {
-      const res = await api.post('/admin/fraud/verify-receipt', {
-        imageUrl,
-        expectedAmount: montantAttendu ? Number(montantAttendu) : undefined,
-        expectedPhone: phoneAttendu || undefined,
-        orderId: orderId || undefined,
-      })
-      resultRecu = res.data?.data ?? null
-    } catch (e: any) {
-      toast.erreur(translate('toast.error'), e.response?.data?.message ?? translate('common.error_save'))
-    } finally { verificationRecuEnCours = false }
   }
 
   onMount(charger)
@@ -127,11 +125,10 @@
 
 <!-- Stats -->
 {#if stats}
-  <div class="grid grid-cols-2 lg:grid-cols-4 stagger gap-3 mb-5">
-    <StatCard titre={$t('admin.fraud.stat.blocked')} valeur={stats.totalBlacklisted ?? 0} icone="block" couleur="rouge" />
-    <StatCard titre={$t('admin.fraud.stat.attempts')} valeur={stats.blockedAttempts ?? 0} icone="security" couleur="orange" />
-    <StatCard titre={$t('admin.fraud.stat.receipts')} valeur={stats.receiptsVerified ?? 0} icone="receipt_long" couleur="bleu" />
-    <StatCard titre={$t('admin.fraud.stat.detected')} valeur={stats.fraudsDetected ?? 0} icone="warning" couleur="jaune" />
+  <div class="grid grid-cols-1 sm:grid-cols-3 stagger gap-3 mb-5">
+    <StatCard titre={$t('admin.fraud.stat.blocked')} valeur={stats.blacklistedPhones ?? 0} icone="block" couleur="rouge" />
+    <StatCard titre="Commandes bloquées pour fraude (ce mois)" valeur={stats.highRiskOrders ?? 0} icone="security" couleur="orange" />
+    <StatCard titre="Commandes rejetées ou annulées (ce mois)" valeur={stats.rejectedOrCancelledOrders ?? 0} icone="warning" couleur="jaune" />
   </div>
 {/if}
 
@@ -174,24 +171,24 @@
               <div class="w-7 h-7 rounded-lg bg-red-50 flex items-center justify-center shrink-0">
                 <span class="material-symbols-outlined text-red-500 icon-filled" style="font-size:14px">block</span>
               </div>
-              <span class="text-sm font-mono font-semibold text-slate-900">{item.phone ?? item.phone_number ?? '—'}</span>
+              <span class="text-sm font-mono font-semibold text-slate-900">{item.phone ?? '—'}</span>
             </div>
             <div class="lg:col-span-4">
               <p class="text-sm text-slate-600 line-clamp-2">{item.reason ?? '—'}</p>
             </div>
             <div class="lg:col-span-2">
-              <p class="text-xs text-slate-500">{formaterDate(item.created_at ?? item.blocked_at)}</p>
+              <p class="text-xs text-slate-500">{formaterDate(item.blockedAt ?? item.createdAt)}</p>
             </div>
             <div class="lg:col-span-2">
-              <p class="text-xs {item.expires_at ? 'text-amber-600' : 'text-slate-400'}">
-                {item.expires_at ? formaterDate(item.expires_at) : $t('admin.fraud.permanent')}
+              <p class="text-xs {item.expiresAt ? 'text-amber-600' : 'text-slate-400'}">
+                {item.expiresAt ? formaterDate(item.expiresAt) : $t('admin.fraud.permanent')}
               </p>
             </div>
             <div class="lg:col-span-1">
-              <button onclick={() => retirerBlacklist(item.phone ?? item.phone_number)}
-                disabled={actionEnCours === (item.phone ?? item.phone_number)}
+              <button onclick={() => retirerBlacklist(item.phone)}
+                disabled={actionEnCours === item.phone}
                 class="text-xs px-2 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 font-semibold hover:bg-emerald-100 disabled:opacity-50">
-                {actionEnCours === (item.phone ?? item.phone_number) ? '...' : $t('admin.fraud.unblock')}
+                {actionEnCours === item.phone ? '...' : $t('admin.fraud.unblock')}
               </button>
             </div>
           </div>
@@ -253,7 +250,9 @@
               </div>
               <div>
                 <p class="text-xs text-slate-500 mb-0.5">{$t('admin.fraud.recommendation')}</p>
-                <p class="font-semibold text-slate-800 capitalize">{resultVerif.recommendation ?? '—'}</p>
+                <p class="font-semibold text-slate-800">
+                  {libellesRecommandation[resultVerif.recommendation] ?? '—'}
+                </p>
               </div>
             </div>
             {#if resultVerif.riskFlags?.length > 0}
@@ -265,60 +264,6 @@
                   {/each}
                 </div>
               </div>
-            {/if}
-          </div>
-        {/if}
-      </div>
-    </div>
-
-    <!-- Vérifier un reçu -->
-    <div class="bg-white rounded-2xl border border-slate-100 card-shadow overflow-hidden">
-      <div class="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
-        <div class="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center">
-          <span class="material-symbols-outlined text-amber-500 icon-filled" style="font-size:18px">receipt_long</span>
-        </div>
-        <h3 class="font-bold text-slate-900">{$t('admin.fraud.verify_receipt')}</h3>
-      </div>
-      <div class="p-5 space-y-4">
-        <div>
-          <label for="receipt-url" class="block text-xs font-semibold text-slate-600 mb-1.5">{$t('admin.fraud.image_url')} *</label>
-          <input id="receipt-url" type="url" bind:value={imageUrl} placeholder="https://..." class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label for="receipt-amount" class="block text-xs font-semibold text-slate-600 mb-1.5">{$t('admin.fraud.expected_amount')}</label>
-            <input id="receipt-amount" type="number" bind:value={montantAttendu} placeholder="5000" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
-          </div>
-          <div>
-            <label for="receipt-phone" class="block text-xs font-semibold text-slate-600 mb-1.5">{$t('admin.fraud.expected_phone')}</label>
-            <input id="receipt-phone" type="tel" bind:value={phoneAttendu} placeholder="6XXXXXXXX" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
-          </div>
-        </div>
-        <div>
-          <label for="receipt-order" class="block text-xs font-semibold text-slate-600 mb-1.5">{$t('admin.fraud.order_id')}</label>
-          <input id="receipt-order" type="text" bind:value={orderId} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
-        </div>
-        <button onclick={verifierRecu} disabled={!imageUrl || verificationRecuEnCours} class="btn-primary w-full justify-center">
-          {#if verificationRecuEnCours}<span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-          {:else}<span class="material-symbols-outlined icon-filled" style="font-size:16px">document_scanner</span>{/if}
-          {$t('admin.fraud.analyze')}
-        </button>
-
-        {#if resultRecu}
-          <div class="p-4 rounded-xl border {resultRecu.isValid ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}">
-            <div class="flex items-center gap-2 mb-2">
-              <span class="material-symbols-outlined icon-filled {resultRecu.isValid ? 'text-emerald-500' : 'text-red-500'}" style="font-size:20px">
-                {resultRecu.isValid ? 'verified' : 'cancel'}
-              </span>
-              <p class="font-bold {resultRecu.isValid ? 'text-emerald-700' : 'text-red-700'}">
-                {resultRecu.isValid ? $t('admin.fraud.receipt_valid') : $t('admin.fraud.receipt_invalid')}
-              </p>
-            </div>
-            {#if resultRecu.extractedAmount}
-              <p class="text-sm text-slate-700">{$t('admin.fraud.extracted_amount')} : <span class="font-bold">{resultRecu.extractedAmount} XAF</span></p>
-            {/if}
-            {#if resultRecu.reason}
-              <p class="text-sm text-slate-600 mt-1">{resultRecu.reason}</p>
             {/if}
           </div>
         {/if}

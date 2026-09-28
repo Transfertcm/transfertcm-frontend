@@ -77,7 +77,7 @@
   }
 
   async function rembourser() {
-    if (!commandeARembourser || !raisonRemboursement.trim()) return
+    if (!commandeARembourser || raisonRemboursement.trim().length < 3) return
     remboursementEnCours = true
     try {
       await api.post(`/admin/orders/${commandeARembourser.id}/refund`, { reason: raisonRemboursement.trim() })
@@ -87,7 +87,7 @@
       if (commandes.length === 1 && page > 1) page--
       else await charger()
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de rembourser')
+      if (!e.toastAffiche) toast.erreur('Remboursement refusé', e.response?.data?.message ?? 'Impossible de rembourser')
     } finally {
       remboursementEnCours = false
     }
@@ -170,9 +170,9 @@
       <div class={categorie === 'to_refund' ? 'col-span-1' : 'col-span-2'}>Bénéficiaire</div>
       <div class="col-span-1">Service</div>
       <div class="col-span-1">Réseau</div>
-      <div class="col-span-1">Montant</div>
+      <div class="col-span-1">{categorie === 'refunded' ? 'Remboursé' : 'Montant'}</div>
       <div class="col-span-1">Statut</div>
-      <div class={categorie === 'to_refund' ? 'col-span-1' : 'col-span-2'}>Date de paiement</div>
+      <div class={categorie === 'to_refund' ? 'col-span-1' : 'col-span-2'}>{categorie === 'refunded' ? 'Remboursée le' : 'Date de paiement'}</div>
       {#if categorie === 'to_refund'}
         <div class="col-span-2 text-right">Actions</div>
       {/if}
@@ -202,17 +202,24 @@
             <span class="text-xs font-semibold text-slate-600 uppercase">{cmd.network ?? '—'}</span>
           </div>
           <div class="lg:col-span-1">
-            <span class="text-sm font-bold text-slate-900">{formaterMontant(cmd.refundAmount ?? cmd.totalAmountWithFees ?? cmd.amount)}</span>
+            {#if categorie === 'refunded'}
+              <span class="text-sm font-bold text-teal-700">{cmd.refundAmount != null ? formaterMontant(cmd.refundAmount) : '—'}</span>
+              <span class="block text-[10px] text-slate-400">payé {formaterMontant(cmd.totalAmountWithFees ?? cmd.amount)}</span>
+            {:else}
+              <span class="text-sm font-bold text-slate-900">{formaterMontant(cmd.totalAmountWithFees ?? cmd.amount)}</span>
+            {/if}
           </div>
           <div class="lg:col-span-1">
             <Badge statut={cmd.status ?? 'pending'} />
           </div>
           <div class={categorie === 'to_refund' ? 'lg:col-span-1' : 'lg:col-span-2'}>
-            {#if cmd.paidAt}
-              <span class="text-xs text-slate-500">{formaterDate(cmd.paidAt)}</span>
+            {#if categorie === 'refunded'}
+              <span class="text-xs text-slate-500">{formaterDate(cmd.refundedAt)}</span>
+              {#if cmd.paidAt}
+                <span class="block text-[10px] text-slate-400">payée le {formaterDate(cmd.paidAt)}</span>
+              {/if}
             {:else}
-              <span class="text-xs text-slate-500">{formaterDate(cmd.timestamp)}</span>
-              <span class="block text-[10px] text-slate-400">(date de commande)</span>
+              <span class="text-xs text-slate-500">{formaterDate(cmd.paidAt)}</span>
             {/if}
           </div>
           {#if categorie === 'to_refund'}
@@ -276,11 +283,11 @@
         </p>
         <div>
           <label for="raison-remboursement" class="block text-xs font-semibold text-slate-600 mb-1.5">Raison du remboursement *</label>
-          <textarea id="raison-remboursement" bind:value={raisonRemboursement} rows="3" placeholder="Expliquez la raison du remboursement..." class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm resize-none" required></textarea>
+          <textarea id="raison-remboursement" bind:value={raisonRemboursement} rows="3" placeholder="Expliquez la raison du remboursement (3 caractères minimum)..." class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm resize-none" required></textarea>
         </div>
         <div class="flex gap-3">
           <button onclick={() => commandeARembourser = null} class="btn-secondary flex-1">Annuler</button>
-          <button onclick={rembourser} disabled={!raisonRemboursement.trim() || remboursementEnCours} class="flex-1 px-4 py-2.5 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2">
+          <button onclick={rembourser} disabled={raisonRemboursement.trim().length < 3 || remboursementEnCours} class="flex-1 px-4 py-2.5 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2">
             {#if remboursementEnCours}
               <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
             {:else}

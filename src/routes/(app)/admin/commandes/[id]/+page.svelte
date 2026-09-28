@@ -83,7 +83,8 @@
   )
   const peutRembourser = $derived(
     auth.peut('canRefundOrders') && !!commande && !!commande.paymentVerified && !commande.refundedAt &&
-    statutsRemboursables.includes(commande.status)
+    statutsRemboursables.includes(commande.status) &&
+    (commande.status !== 'completed' || auth.user?.role === 'super_admin')
   )
   const peutCreerLien = $derived(
     !!commande && !!commande.amount && !commande.paymentVerified &&
@@ -198,7 +199,7 @@
       raisonRemboursement = ''
       await charger()
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de rembourser')
+      if (!e.toastAffiche) toast.erreur('Remboursement refusé', e.response?.data?.message ?? 'Impossible de rembourser')
     } finally {
       actionEnCours = ''
     }
@@ -660,11 +661,11 @@
         </p>
         <div>
           <label for="raison-remboursement" class="block text-xs font-semibold text-slate-600 mb-1.5">Raison du remboursement *</label>
-          <textarea id="raison-remboursement" bind:value={raisonRemboursement} rows="3" placeholder="Expliquez la raison du remboursement..." class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm resize-none" required></textarea>
+          <textarea id="raison-remboursement" bind:value={raisonRemboursement} rows="3" placeholder="Expliquez la raison du remboursement (3 caractères minimum)..." class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm resize-none" required></textarea>
         </div>
         <div class="flex gap-3">
           <button onclick={() => afficherModalRemboursement = false} class="btn-secondary flex-1">Annuler</button>
-          <button onclick={rembourser} disabled={!raisonRemboursement || actionEnCours === 'rembourser'} class="flex-1 px-4 py-2.5 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2">
+          <button onclick={rembourser} disabled={raisonRemboursement.trim().length < 3 || actionEnCours === 'rembourser'} class="flex-1 px-4 py-2.5 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-50 flex items-center justify-center gap-2">
             {#if actionEnCours === 'rembourser'}
               <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
             {:else}

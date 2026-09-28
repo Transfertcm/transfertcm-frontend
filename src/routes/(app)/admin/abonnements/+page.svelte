@@ -45,6 +45,11 @@
     critical: 'Critique',
   }
 
+  function libelleMethode(methode: string | null | undefined) {
+    if (!methode) return ''
+    return methodesPaiement[methode] ? translate(methodesPaiement[methode]) : methode
+  }
+
   function libellePlan(plan: string | null | undefined) {
     if (!plan) return '—'
     return planLabels[plan] ? translate(planLabels[plan]) : plan
@@ -239,8 +244,10 @@
         if (formStatutFacture.paymentMethod) payload.paymentMethod = formStatutFacture.paymentMethod
         if (formStatutFacture.paymentReference.trim()) payload.paymentReference = formStatutFacture.paymentReference.trim()
       }
-      await api.patch(`/admin/subscriptions/invoices/${factureSelectionnee.id}/status`, payload)
-      toast.succes('Facture mise à jour')
+      const res = await api.patch(`/admin/subscriptions/invoices/${factureSelectionnee.id}/status`, payload)
+      const maj = res.data?.data
+      const detailPaiement = [libelleMethode(maj?.paymentMethod), maj?.paymentReference ? `réf. ${maj.paymentReference}` : ''].filter(Boolean).join(' · ')
+      toast.succes(`Facture ${statutsDocument[maj?.status]?.label.toLowerCase() ?? 'mise à jour'}`, detailPaiement || undefined)
       factureSelectionnee = null
       await chargerFactures()
     } catch (e: any) {
@@ -453,6 +460,11 @@
             </div>
             <div class="lg:col-span-2">
               <p class="text-sm font-bold text-slate-900">{formaterMontant(fact.amount)}</p>
+              {#if fact.paymentMethod || fact.paymentReference}
+                <p class="text-xs text-slate-400">
+                  {libelleMethode(fact.paymentMethod)}{fact.paymentMethod && fact.paymentReference ? ' · ' : ''}{#if fact.paymentReference}<span class="font-mono">réf. {fact.paymentReference}</span>{/if}
+                </p>
+              {/if}
             </div>
             <div class="lg:col-span-2">
               <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border {st.classe}">{st.label}</span>

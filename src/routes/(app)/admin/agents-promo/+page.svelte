@@ -3,6 +3,7 @@
   import api from '$lib/api'
   import { toast } from '$lib/stores/toast.svelte'
   import { auth } from '$lib/stores/auth.svelte'
+  import Modal from '$lib/components/ui/Modal.svelte'
 
   let agents = $state<any[]>([])
   let meta = $state<any>(null)
@@ -26,6 +27,12 @@
     city: '', neighborhood: '', idNumber: '', idType: 'CNI',
   })
   let erreurs = $state<Record<string, string>>({})
+
+  let editionPiece = $state(false)
+  let formPiece = $state({ idType: '', idNumber: '' })
+  let enregistrementPiece = $state(false)
+  let confirmationDesactivation = $state(false)
+  let desactivation = $state(false)
 
   const libellesStatut: Record<string, string> = { active: 'Actif', inactive: 'Inactif', suspended: 'Suspendu' }
 
@@ -60,6 +67,7 @@
 
   async function voirDetail(agent: any) {
     agentSelectionne = agent
+    editionPiece = false
     statsAgent = null
     statsErreur = ''
     statsChargement = true
@@ -96,6 +104,40 @@
         if (!e.toastAffiche) toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de créer')
       }
     } finally { creation = false }
+  }
+
+  function ouvrirEditionPiece() {
+    formPiece = { idType: agentSelectionne?.idType ?? '', idNumber: agentSelectionne?.idNumber ?? '' }
+    editionPiece = true
+  }
+
+  async function enregistrerPiece() {
+    if (!agentSelectionne) return
+    enregistrementPiece = true
+    try {
+      const modifs = { idType: formPiece.idType || null, idNumber: formPiece.idNumber.trim() || null }
+      await api.put(`/admin/promo-agents/${agentSelectionne.id}`, modifs)
+      agentSelectionne = { ...agentSelectionne, ...modifs }
+      agents = agents.map((a) => a.id === agentSelectionne.id ? { ...a, idType: modifs.idType } : a)
+      editionPiece = false
+      toast.succes('Pièce d\'identité mise à jour')
+    } catch (e: any) {
+      if (!e.toastAffiche) toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de mettre à jour')
+    } finally { enregistrementPiece = false }
+  }
+
+  async function desactiverAgent() {
+    if (!agentSelectionne) return
+    desactivation = true
+    try {
+      await api.delete(`/admin/promo-agents/${agentSelectionne.id}`)
+      agentSelectionne = { ...agentSelectionne, status: 'inactive' }
+      confirmationDesactivation = false
+      toast.succes('Agent désactivé')
+      await charger()
+    } catch (e: any) {
+      if (!e.toastAffiche) toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de désactiver')
+    } finally { desactivation = false }
   }
 
   let timer: ReturnType<typeof setTimeout>
@@ -239,8 +281,6 @@
             ['Téléphone', agentSelectionne.phone],
             ['Ville', agentSelectionne.city],
             ['Quartier', agentSelectionne.neighborhood],
-            ['Type pièce', agentSelectionne.idType],
-            ['Numéro de pièce', agentSelectionne.idNumber],
             ['Statut', libellesStatut[agentSelectionne.status]],
             ['Inscrit le', formaterDate(agentSelectionne.createdAt)],
           ] as [label, val]}
@@ -251,6 +291,47 @@
               </div>
             {/if}
           {/each}
+        </div>
+
+        <div class="p-4 rounded-xl border border-slate-100">
+          <div class="flex items-center justify-between mb-2">
+            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Pièce d'identité</p>
+            {#if peutGerer && !editionPiece}
+              <button onclick={ouvrirEditionPiece} title="Modifier"
+                class="w-8 h-8 rounded-lg hover:bg-orange-50 flex items-center justify-center text-slate-400 hover:text-orange-500">
+                <span class="material-symbols-outlined" style="font-size:16px">edit</span>
+              </button>
+            {/if}
+          </div>
+          {#if editionPiece}
+            <div class="grid grid-cols-2 gap-3">
+              <select bind:value={formPiece.idType} aria-label="Type de pièce" class="px-3 py-2 rounded-xl border border-slate-200 text-sm">
+                <option value="">Aucune</option>
+                <option value="CNI">CNI</option>
+                <option value="Passeport">Passeport</option>
+                <option value="Permis">Permis</option>
+              </select>
+              <input type="text" bind:value={formPiece.idNumber} placeholder="Numéro de pièce" aria-label="Numéro de pièce"
+                class="px-3 py-2 rounded-xl border border-slate-200 text-sm" />
+            </div>
+            <div class="flex gap-2 mt-3">
+              <button onclick={() => editionPiece = false} class="btn-secondary flex-1">Annuler</button>
+              <button onclick={enregistrerPiece} disabled={enregistrementPiece} class="btn-primary flex-1 justify-center">
+                {#if enregistrementPiece}<span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>{:else}Enregistrer{/if}
+              </button>
+            </div>
+          {:else}
+            <div class="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <p class="text-xs text-slate-400 mb-0.5">Type</p>
+                <p class="font-semibold text-slate-800">{agentSelectionne.idType ?? '—'}</p>
+              </div>
+              <div>
+                <p class="text-xs text-slate-400 mb-0.5">Numéro</p>
+                <p class="font-semibold text-slate-800">{agentSelectionne.idNumber ?? '—'}</p>
+              </div>
+            </div>
+          {/if}
         </div>
 
         <!-- Stats -->
@@ -295,6 +376,16 @@
           </div>
         {:else}
           <p class="text-sm text-slate-400 text-center py-4">{statsErreur || 'Aucune statistique disponible'}</p>
+        {/if}
+
+        {#if peutGerer && agentSelectionne.status !== 'inactive'}
+          <div class="pt-4 border-t border-slate-100 flex justify-end">
+            <button onclick={() => confirmationDesactivation = true}
+              class="px-3 py-2 rounded-xl border border-red-200 text-red-600 text-sm font-semibold hover:bg-red-50 flex items-center gap-1.5">
+              <span class="material-symbols-outlined" style="font-size:16px">person_off</span>
+              Désactiver
+            </button>
+          </div>
         {/if}
       </div>
     </div>
@@ -366,3 +457,17 @@
   </div>
 {/if}
 
+<Modal bind:ouvert={confirmationDesactivation} titre="Désactiver cet agent ?" largeur="sm">
+  <div class="p-6 space-y-4">
+    <p class="text-sm text-slate-600">
+      <span class="font-semibold">{agentSelectionne?.firstName} {agentSelectionne?.lastName}</span> passera au statut « Inactif ». Son historique et ses parrainages sont conservés.
+    </p>
+    <div class="flex gap-3">
+      <button onclick={() => confirmationDesactivation = false} class="btn-secondary flex-1">Annuler</button>
+      <button onclick={desactiverAgent} disabled={desactivation}
+        class="flex-1 px-4 py-2.5 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 disabled:opacity-50">
+        {desactivation ? '...' : 'Désactiver'}
+      </button>
+    </div>
+  </div>
+</Modal>

@@ -52,17 +52,17 @@
     return num.toLocaleString('fr-CM') + ' XAF'
   }
 
-  function nomAdmin(id: string | null) {
-    if (!id) return '—'
-    if (id === auth.user?.id) return auth.user?.fullName || auth.user?.email || 'Vous'
-    const a = admins.find((x: any) => x.id === id)
-    return a ? (a.fullName || a.email) : `Admin ${id.slice(-8)}`
+  const libellesRoles: Record<string, string> = {
+    super_admin: 'Super admin',
+    admin: 'Admin',
+    service_client: 'Service client',
+    chef_agents_promo: 'Chef agents promo',
+    controleur_cabine: 'Contrôleur cabine',
   }
 
   async function chargerAdmins() {
-    if (auth.user?.role !== 'super_admin') return
     try {
-      const res = await api.get('/admin/team')
+      const res = await api.get('/admin/directory')
       admins = res.data?.data ?? []
     } catch {}
   }
@@ -178,8 +178,7 @@
       formPaiement = { adminId: '', amountPaid: '', paymentMethod: 'cash', notes: '' }
       await charger()
     } catch (e: any) {
-      const detail = e.response?.data?.errors?.map((x: any) => x.message).join(' ')
-      toast.erreur(translate('toast.error'), detail || (e.response?.data?.message ?? translate('salary.error_save')))
+      toast.erreur(translate('toast.error'), e.response?.data?.message ?? translate('salary.error_save'))
     } finally { actionEnCours = '' }
   }
 
@@ -195,8 +194,7 @@
       afficherModalConfig = false
       await charger()
     } catch (e: any) {
-      const detail = e.response?.data?.errors?.map((x: any) => x.message).join(' ')
-      toast.erreur(translate('toast.error'), detail || (e.response?.data?.message ?? translate('salary.error_config')))
+      toast.erreur(translate('toast.error'), e.response?.data?.message ?? translate('salary.error_config'))
     } finally { actionEnCours = '' }
   }
 
@@ -204,19 +202,17 @@
 
   $effect(() => {
     if (!idUtilisateur) return
-    untrack(() => { charger(); chargerAdmins() })
+    untrack(charger)
   })
 
   onMount(() => () => { if (intervalTimer) clearInterval(intervalTimer) })
 
-  const estSuperAdmin = $derived(auth.user?.role === 'super_admin')
   const peutGerer = $derived(auth.peut('canViewSalaries'))
 
+  $effect(() => { if (peutGerer) untrack(chargerAdmins) })
+
   const adminsPaiement = $derived(
-    estSuperAdmin
-      ? admins.map((a: any) => ({ id: a.id, libelle: a.fullName ? `${a.fullName} (${a.email})` : a.email }))
-      : [...new Set([...sessions, ...paiements].map((x: any) => x.adminId).filter(Boolean))]
-          .map((id: string) => ({ id, libelle: nomAdmin(id) }))
+    admins.map((a: any) => ({ id: a.id, libelle: `${a.fullName} · ${libellesRoles[a.role] ?? 'Admin'}` }))
   )
 
   const couleurStatut: Record<string, string> = {
@@ -343,7 +339,7 @@
         {#each sessions as sess}
           <div class="flex flex-col gap-2 lg:grid lg:grid-cols-12 lg:gap-3 lg:items-center px-5 py-3.5 hover:bg-slate-50 transition-all">
             <div class="lg:col-span-3">
-              <p class="text-sm font-semibold text-slate-800">{nomAdmin(sess.adminId)}</p>
+              <p class="text-sm font-semibold text-slate-800">{sess.adminName ?? '—'}</p>
             </div>
             <div class="lg:col-span-2">
               <span class="text-xs font-semibold px-2.5 py-1 rounded-full {couleurStatut[sess.status] ?? 'bg-slate-100 text-slate-600'}">
@@ -381,8 +377,8 @@
               <span class="material-symbols-outlined text-emerald-500 icon-filled" style="font-size:18px">payments</span>
             </div>
             <div class="flex-1 min-w-0">
-              <p class="text-sm font-semibold text-slate-800">{nomAdmin(pay.adminId)}</p>
-              <p class="text-xs text-slate-400">{formaterDate(pay.paymentDate ?? pay.createdAt)} · {pay.paymentMethod ? $t('admin.salary.method.' + pay.paymentMethod) : '—'}{pay.notes ? ` · ${pay.notes}` : ''}</p>
+              <p class="text-sm font-semibold text-slate-800">{pay.adminName ?? '—'}</p>
+              <p class="text-xs text-slate-400">{formaterDate(pay.createdAt ?? pay.paymentDate)} · {pay.paymentMethod ? $t('admin.salary.method.' + pay.paymentMethod) : '—'}{pay.paidByName ? ` · Payé par ${pay.paidByName}` : ''}{pay.notes ? ` · ${pay.notes}` : ''}</p>
             </div>
             <p class="text-sm font-bold text-emerald-600">{formaterMontant(pay.amountPaid)}</p>
           </div>
@@ -411,9 +407,6 @@
               <option value={a.id}>{a.libelle}</option>
             {/each}
           </select>
-          {#if !estSuperAdmin}
-            <p class="text-xs text-slate-400 mt-1">Seuls les admins ayant des sessions ou paiements récents sont proposés : la liste complète de l'équipe est réservée au super administrateur.</p>
-          {/if}
         </div>
         <div class="grid grid-cols-2 gap-4">
           <div>

@@ -304,7 +304,7 @@
   <div class="mt-5 bg-white rounded-2xl border border-slate-100 overflow-hidden card-shadow">
     <div class="px-5 py-4 border-b border-slate-100">
       <h3 class="font-bold text-slate-900">{$t('admin.dashboard.by_operator')}</h3>
-      <p class="text-xs text-slate-400 mt-0.5">{$t('admin.dashboard.operators_info')}</p>
+      <p class="text-xs text-slate-400 mt-0.5">Commandes créées et chiffre d'affaires des commandes livrées et payées, par réseau</p>
     </div>
     <div class="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
       {#each (stats?.orders?.byNetwork ?? []) as reseau}
@@ -321,7 +321,8 @@
             </div>
             <div class="flex items-center gap-2">
               <span class="text-sm font-bold text-slate-900">{reseau.count}</span>
-              <span class="text-xs text-slate-400">{pct}%</span>
+              <span class="text-xs text-slate-500">commande{Number(reseau.count) > 1 ? 's' : ''} créée{Number(reseau.count) > 1 ? 's' : ''}</span>
+              <span class="text-xs text-slate-400">· {pct}%</span>
             </div>
           </div>
           <div class="h-2 bg-slate-100 rounded-full overflow-hidden">
@@ -331,7 +332,8 @@
             ></div>
           </div>
           <p class="text-xs text-slate-400 mt-1">
-            {$t('admin.dashboard.total')} : {formaterMontant(reseau.totalAmount ?? 0)}
+            Chiffre d'affaires (hors frais) : <span class="font-semibold text-slate-600">{formaterMontant(reseau.totalAmount ?? 0)}</span>
+            · {reseau.completed ?? 0} livrée{Number(reseau.completed ?? 0) > 1 ? 's' : ''} et payée{Number(reseau.completed ?? 0) > 1 ? 's' : ''}
           </p>
         </div>
       {/each}

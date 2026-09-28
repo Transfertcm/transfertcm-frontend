@@ -3,6 +3,7 @@
   import { auth } from '$lib/stores/auth.svelte'
   import api from '$lib/api'
   import { toast } from '$lib/stores/toast.svelte'
+  import Modal from '$lib/components/ui/Modal.svelte'
 
   type Onglet = 'cabines' | 'admins' | 'groupe'
   const peutCabines = $derived(auth.peut('canMessageCabins'))
@@ -27,6 +28,11 @@
   let contenu = $state('')
   let contenueGroupe = $state('')
   let envoiGroupe = $state(false)
+
+  let afficherNouvelle = $state(false)
+  let annuaire = $state<any[]>([])
+  let chargementAnnuaire = $state(false)
+  let demarrage = $state('')
 
   let zoneMessages = $state<HTMLDivElement | undefined>(undefined)
   let intervalle: ReturnType<typeof setInterval> | undefined
@@ -156,6 +162,40 @@
     } finally { envoiGroupe = false }
   }
 
+  const libellesRoles: Record<string, string> = {
+    super_admin: 'Super admin',
+    admin: 'Admin',
+    service_client: 'Service client',
+    chef_agents_promo: 'Chef agents promo',
+    controleur_cabine: 'Contrôleur cabine',
+  }
+
+  async function ouvrirNouvelle() {
+    afficherNouvelle = true
+    if (annuaire.length) return
+    chargementAnnuaire = true
+    try {
+      const res = await api.get('/admin/directory')
+      annuaire = listeDepuis(res).filter((a: any) => !estMonId(a.id))
+    } catch { toast.erreur('Erreur', 'Impossible de charger la liste des admins') }
+    finally { chargementAnnuaire = false }
+  }
+
+  async function demarrerConversation(admin: any) {
+    demarrage = admin.id
+    try {
+      const res = await api.post('/admin/messaging/conversations', { userId: admin.id })
+      const conv = res.data?.data
+      if (!conv?.id) return
+      const existante = convAdmins.find((c) => c.id === conv.id)
+      if (!existante) convAdmins = [conv, ...convAdmins]
+      afficherNouvelle = false
+      await ouvrirConversation(existante ?? conv)
+    } catch (e: any) {
+      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de démarrer la conversation')
+    } finally { demarrage = '' }
+  }
+
   function surChangementOnglet(o: Onglet) {
     onglet = o
     convActive = null
@@ -204,10 +244,17 @@
 
     <!-- Liste conversations -->
     <div class="w-72 shrink-0 border-r border-slate-100 flex flex-col {convActive ? 'hidden lg:flex' : 'flex'}">
-      <div class="px-4 py-3 border-b border-slate-100">
+      <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-2">
         <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide">
           {onglet === 'cabines' ? 'Conversations cabines' : onglet === 'admins' ? 'Conversations admins' : 'Canal groupe'}
         </p>
+        {#if onglet === 'admins'}
+          <button onclick={ouvrirNouvelle} title="Nouvelle conversation" aria-label="Nouvelle conversation"
+            class="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold text-orange-600 hover:bg-orange-50 whitespace-nowrap shrink-0">
+            <span class="material-symbols-outlined" style="font-size:16px">add</span>
+            Nouvelle
+          </button>
+        {/if}
       </div>
 
       {#if onglet === 'groupe'}
@@ -379,3 +426,31 @@
     </div>
   </div>
 </div>
+
+<Modal bind:ouvert={afficherNouvelle} titre="Nouvelle conversation" largeur="sm">
+  <div class="p-4">
+    {#if chargementAnnuaire}
+      <div class="space-y-2">{#each Array(4) as _}<div class="skeleton h-12 rounded-xl"></div>{/each}</div>
+    {:else if annuaire.length === 0}
+      <p class="py-8 text-center text-sm text-slate-400">Aucun autre admin disponible</p>
+    {:else}
+      <div class="max-h-96 overflow-y-auto divide-y divide-slate-50">
+        {#each annuaire as a}
+          <button onclick={() => demarrerConversation(a)} disabled={!!demarrage}
+            class="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-slate-50 text-left disabled:opacity-50">
+            <div class="w-9 h-9 rounded-xl bg-orange-50 flex items-center justify-center shrink-0">
+              <span class="material-symbols-outlined text-orange-500 icon-filled" style="font-size:18px">person</span>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-semibold text-slate-800 truncate">{a.fullName}</p>
+              <p class="text-xs text-slate-400">{libellesRoles[a.role] ?? 'Admin'}</p>
+            </div>
+            {#if demarrage === a.id}
+              <span class="w-4 h-4 border-2 border-orange-200 border-t-orange-500 rounded-full animate-spin"></span>
+            {/if}
+          </button>
+        {/each}
+      </div>
+    {/if}
+  </div>
+</Modal>

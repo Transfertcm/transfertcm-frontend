@@ -21,6 +21,9 @@
   let cabines = $state<any[]>([])
   const nomsCabines = $derived(Object.fromEntries(cabines.map((c) => [c.id, c.name])))
 
+  let toutesSims = $state<any[]>([])
+  const nomsSims = $derived(Object.fromEntries(toutesSims.map((s) => [s.id, s.cardName])))
+
   // Historique
   let historique = $state<any[]>([])
   let metaHist = $state<any>(null)
@@ -33,12 +36,25 @@
   let afficherModalSim = $state(false)
   let afficherModalValider = $state(false)
   let afficherModalRejeter = $state(false)
+  let afficherModalSolde = $state(false)
+  let simSelectionnee = $state<any>(null)
   let demandeSelectionnee = $state<any>(null)
 
   // Formulaires
-  let formSim = $state({ network: 'mtn', cardName: '', phoneNumber: '', assignedCabinId: '' })
+  let formSim = $state<{ network: string; cardName: string; phoneNumber: string; assignedCabinId: string; currentBalance: number | null }>({ network: 'mtn', cardName: '', phoneNumber: '', assignedCabinId: '', currentBalance: null })
+  let formSolde = $state<{ sens: 'recharge' | 'correction'; montant: number | null; description: string }>({ sens: 'recharge', montant: null, description: '' })
   let simCardId = $state('')
   let raisonRejet = $state('')
+
+  const simChoisie = $derived(simCardsValidation.find((s) => s.id === simCardId) ?? null)
+  const deltaSolde = $derived(formSolde.montant ? (formSolde.sens === 'recharge' ? 1 : -1) * Math.abs(Math.trunc(formSolde.montant)) : 0)
+  const nouveauSolde = $derived(simSelectionnee ? Number(simSelectionnee.currentBalance ?? 0) + deltaSolde : 0)
+  const soldeInitialValide = $derived(formSim.currentBalance == null || (Number.isInteger(formSim.currentBalance) && formSim.currentBalance >= 0))
+
+  function messageErreur(e: any, defaut: string) {
+    const erreurs = e.response?.data?.errors
+    return e.response?.data?.message ?? (Array.isArray(erreurs) && erreurs.length ? erreurs.map((x: any) => x.message).join(' • ') : defaut)
+  }
 
   function formaterDate(d: string | null) {
     if (!d) return '—'
@@ -66,6 +82,13 @@
       simCards = res.data?.data ?? []
     } catch { toast.erreur(translate('toast.error'), translate('common.error_load')) }
     finally { chargement = false }
+  }
+
+  async function chargerToutesSims() {
+    try {
+      const res = await api.get('/admin/uv/sim-cards')
+      toutesSims = res.data?.data ?? []
+    } catch { toutesSims = [] }
   }
 
   async function chargerCabines() {
@@ -109,8 +132,7 @@
       simCardId = ''
       await chargerDemandes()
     } catch (e: any) {
-      const erreurs = e.response?.data?.errors
-      toast.erreur(translate('toast.error'), Array.isArray(erreurs) && erreurs.length ? erreurs.map((x: any) => x.message).join(' • ') : (e.response?.data?.message ?? translate('common.error_save')))
+      if (!e.toastAffiche) toast.erreur('Validation refusée', messageErreur(e, translate('common.error_save')))
     } finally { actionEnCours = '' }
   }
 
@@ -124,8 +146,7 @@
       raisonRejet = ''
       await chargerDemandes()
     } catch (e: any) {
-      const erreurs = e.response?.data?.errors
-      toast.erreur(translate('toast.error'), Array.isArray(erreurs) && erreurs.length ? erreurs.map((x: any) => x.message).join(' • ') : (e.response?.data?.message ?? translate('common.error_save')))
+      if (!e.toastAffiche) toast.erreur(translate('toast.error'), messageErreur(e, translate('common.error_save')))
     } finally { actionEnCours = '' }
   }
 
@@ -134,16 +155,46 @@
     try {
       const payload: any = { ...formSim }
       if (!payload.assignedCabinId) delete payload.assignedCabinId
+      if (payload.currentBalance == null) delete payload.currentBalance
       payload.phoneNumber = payload.phoneNumber.replace(/[\s\-]/g, '')
       await api.post('/admin/uv/sim-cards', payload)
       toast.succes(translate('admin.uv.sim_created'))
       afficherModalSim = false
-      formSim = { network: 'mtn', cardName: '', phoneNumber: '', assignedCabinId: '' }
-      await chargerSimCards()
+      formSim = { network: 'mtn', cardName: '', phoneNumber: '', assignedCabinId: '', currentBalance: null }
+      await Promise.all([chargerSimCards(), chargerToutesSims()])
     } catch (e: any) {
-      const erreurs = e.response?.data?.errors
-      toast.erreur(translate('toast.error'), Array.isArray(erreurs) && erreurs.length ? erreurs.map((x: any) => x.message).join(' • ') : (e.response?.data?.message ?? translate('common.error_save')))
+      if (!e.toastAffiche) toast.erreur(translate('toast.error'), messageErreur(e, translate('common.error_save')))
     } finally { actionEnCours = '' }
+  }
+
+  function ouvrirSolde(sim: any) {
+    simSelectionnee = sim
+    formSolde = { sens: 'recharge', montant: null, description: '' }
+    afficherModalSolde = true
+  }
+
+  async function ajusterSolde() {
+    if (!simSelectionnee || !deltaSolde || nouveauSolde < 0) return
+    actionEnCours = 'solde'
+    try {
+      await api.patch(`/admin/uv/sim-cards/${simSelectionnee.id}/balance`, {
+        delta: deltaSolde,
+        description: formSolde.description.trim(),
+      })
+      toast.succes('Solde de la SIM mis à jour', `Nouveau solde : ${nouveauSolde} UV`)
+      afficherModalSolde = false
+      simSelectionnee = null
+      await Promise.all([chargerSimCards(), chargerToutesSims()])
+    } catch (e: any) {
+      if (!e.toastAffiche) toast.erreur('Mise à jour refusée', messageErreur(e, translate('common.error_save')))
+    } finally { actionEnCours = '' }
+  }
+
+  function estCredit(tx: any) {
+    if (tx.balanceBefore !== null && tx.balanceBefore !== undefined && tx.balanceAfter !== null && tx.balanceAfter !== undefined) {
+      return Number(tx.balanceAfter) >= Number(tx.balanceBefore)
+    }
+    return tx.transactionType === 'recharge' || tx.transactionType === 'sim_recharge'
   }
 
   $effect(() => {
@@ -155,18 +206,25 @@
     })
   })
 
-  onMount(chargerCabines)
+  onMount(() => {
+    chargerCabines()
+    chargerToutesSims()
+  })
 
   const libellesType: Record<string, string> = {
     recharge: 'Recharge',
     deduction: 'Déduction',
     adjustment: 'Ajustement',
+    sim_recharge: 'Recharge SIM',
+    sim_adjustment: 'Correction SIM',
   }
 
   const couleurType: Record<string, string> = {
     recharge: 'text-emerald-600 bg-emerald-50',
     deduction: 'text-red-600 bg-red-50',
     adjustment: 'text-blue-600 bg-blue-50',
+    sim_recharge: 'text-emerald-600 bg-emerald-50',
+    sim_adjustment: 'text-blue-600 bg-blue-50',
   }
 </script>
 
@@ -326,6 +384,11 @@
                 {sim.isActive ? $t('status.active') : $t('status.inactive')}
               </p>
             </div>
+            <button onclick={() => ouvrirSolde(sim)}
+              class="text-xs px-2 py-1.5 rounded-lg bg-slate-100 text-slate-700 font-semibold hover:bg-slate-200 flex items-center gap-1 shrink-0">
+              <span class="material-symbols-outlined icon-filled" style="font-size:13px">account_balance_wallet</span>
+              Recharger / corriger le solde
+            </button>
           </div>
         {/each}
       </div>
@@ -347,17 +410,23 @@
           <div class="flex items-center gap-4 px-5 py-3.5 hover:bg-slate-50 transition-all">
             <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 {couleurType[tx.transactionType] ?? 'bg-slate-100 text-slate-600'}">
               <span class="material-symbols-outlined icon-filled" style="font-size:16px">
-                {tx.transactionType === 'recharge' ? 'add_circle' : tx.transactionType === 'deduction' ? 'remove_circle' : 'tune'}
+                {tx.transactionType === 'recharge' ? 'add_circle' : tx.transactionType === 'deduction' ? 'remove_circle' : tx.transactionType?.startsWith('sim_') ? 'sim_card' : 'tune'}
               </span>
             </div>
             <div class="flex-1 min-w-0">
-              <p class="text-sm font-semibold text-slate-800">{tx.cabinName ?? nomsCabines[tx.cabinId] ?? '—'}</p>
-              <p class="text-xs text-slate-500">{tx.description ?? libellesType[tx.transactionType] ?? '—'}</p>
+              {#if !tx.cabinId && tx.simCardId}
+                <p class="text-sm font-semibold text-slate-800">SIM : {nomsSims[tx.simCardId] ?? '—'}</p>
+              {:else}
+                <p class="text-sm font-semibold text-slate-800">{tx.cabinName ?? nomsCabines[tx.cabinId] ?? '—'}</p>
+              {/if}
+              <p class="text-xs text-slate-500">
+                {libellesType[tx.transactionType] ?? 'Mouvement'}{tx.description && tx.description !== libellesType[tx.transactionType] ? ` · ${tx.description}` : ''}
+              </p>
               <p class="text-xs text-slate-400">{formaterDate(tx.createdAt)}</p>
             </div>
             <div class="text-right shrink-0">
-              <p class="text-sm font-bold {tx.transactionType === 'recharge' ? 'text-emerald-600' : 'text-red-600'}">
-                {tx.transactionType === 'recharge' ? '+' : '-'}{tx.amount ?? 0} UV
+              <p class="text-sm font-bold {estCredit(tx) ? 'text-emerald-600' : 'text-red-600'}">
+                {estCredit(tx) ? '+' : '-'}{tx.amount ?? 0} UV
               </p>
               {#if tx.balanceBefore !== null && tx.balanceBefore !== undefined && tx.balanceAfter !== null && tx.balanceAfter !== undefined}
                 <p class="text-xs text-slate-400">{tx.balanceBefore} → {tx.balanceAfter} UV</p>
@@ -446,6 +515,9 @@
               <option value={sim.id}>{sim.cardName} — {sim.phoneNumber} ({sim.currentBalance ?? 0} UV)</option>
             {/each}
           </select>
+          {#if simChoisie && Number(simChoisie.currentBalance ?? 0) < Number(demandeSelectionnee.amountRequested ?? 0)}
+            <p class="text-xs text-red-500 mt-1">Solde de cette SIM insuffisant : {simChoisie.currentBalance ?? 0} UV disponibles pour {demandeSelectionnee.amountRequested} demandés.</p>
+          {/if}
         </div>
         <div class="flex gap-3">
           <button onclick={() => afficherModalValider = false} class="btn-secondary flex-1">{$t('common.cancel')}</button>
@@ -516,6 +588,15 @@
           <input id="sim-name" type="text" bind:value={formSim.cardName} placeholder="Ex: SIM MTN Principale" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
         </div>
         <div>
+          <label for="sim-solde" class="block text-xs font-semibold text-slate-600 mb-1.5">Solde initial (UV)</label>
+          <input id="sim-solde" type="number" min="0" step="1" bind:value={formSim.currentBalance} placeholder="0" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
+          {#if !soldeInitialValide}
+            <p class="text-xs text-red-500 mt-1">Le solde initial doit être un nombre entier positif ou nul.</p>
+          {:else}
+            <p class="text-xs text-slate-400 mt-1">Solde réel de la SIM au moment de son ajout. Laisser vide pour 0.</p>
+          {/if}
+        </div>
+        <div>
           <label for="sim-cabin" class="block text-xs font-semibold text-slate-600 mb-1.5">{$t('admin.uv.assigned_cabin_optional')}</label>
           <select id="sim-cabin" bind:value={formSim.assignedCabinId} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
             <option value="">—</option>
@@ -524,7 +605,7 @@
         </div>
         <div class="flex gap-3">
           <button onclick={() => afficherModalSim = false} class="btn-secondary flex-1">{$t('common.cancel')}</button>
-          <button onclick={creerSimCard} disabled={!formSim.cardName || !formSim.phoneNumber || actionEnCours === 'sim'} class="btn-primary flex-1 justify-center">
+          <button onclick={creerSimCard} disabled={!formSim.cardName || !formSim.phoneNumber || !soldeInitialValide || actionEnCours === 'sim'} class="btn-primary flex-1 justify-center">
             {#if actionEnCours === 'sim'}<span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>{:else}
               <span class="material-symbols-outlined icon-filled" style="font-size:16px">add</span>{$t('common.create')}
             {/if}
@@ -535,3 +616,60 @@
   </div>
 {/if}
 
+
+{#if afficherModalSolde && simSelectionnee}
+  <div class="fixed inset-0 z-50 grid place-items-center min-h-screen p-4 pointer-events-none">
+    <div class="bg-white rounded-2xl w-full max-w-md pointer-events-auto animate-fade-in-up" style="box-shadow: 0 25px 60px rgba(0,0,0,0.18), 0 8px 24px rgba(0,0,0,0.10);">
+      <div class="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
+        <h3 class="font-bold text-slate-900">Recharger / corriger le solde</h3>
+        <button onclick={() => afficherModalSolde = false} class="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400">
+          <span class="material-symbols-outlined" style="font-size:18px">close</span>
+        </button>
+      </div>
+      <div class="p-6 space-y-4">
+        <div class="p-4 rounded-xl bg-slate-50 border border-slate-100">
+          <p class="text-xs text-slate-500 font-medium">{simSelectionnee.cardName ?? '—'} · {simSelectionnee.phoneNumber ?? '—'}</p>
+          <p class="text-2xl font-black text-slate-900 mt-1">{simSelectionnee.currentBalance ?? 0} UV</p>
+          <p class="text-xs text-slate-400">Solde actuel</p>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <button onclick={() => formSolde.sens = 'recharge'}
+            class="px-3 py-2.5 rounded-xl border text-sm font-semibold flex items-center justify-center gap-1.5 {formSolde.sens === 'recharge' ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}">
+            <span class="material-symbols-outlined icon-filled" style="font-size:16px">add_circle</span>
+            Recharge (ajouter)
+          </button>
+          <button onclick={() => formSolde.sens = 'correction'}
+            class="px-3 py-2.5 rounded-xl border text-sm font-semibold flex items-center justify-center gap-1.5 {formSolde.sens === 'correction' ? 'border-red-300 bg-red-50 text-red-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}">
+            <span class="material-symbols-outlined icon-filled" style="font-size:16px">remove_circle</span>
+            Correction (retirer)
+          </button>
+        </div>
+        <div>
+          <label for="solde-montant" class="block text-xs font-semibold text-slate-600 mb-1.5">Nombre d'UV *</label>
+          <input id="solde-montant" type="number" min="1" step="1" bind:value={formSolde.montant} placeholder="Ex : 5000" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
+        </div>
+        <div>
+          <label for="solde-description" class="block text-xs font-semibold text-slate-600 mb-1.5">Motif *</label>
+          <input id="solde-description" type="text" bind:value={formSolde.description} maxlength="255" placeholder={formSolde.sens === 'recharge' ? 'Ex : Achat UV MTN' : 'Ex : Écart constaté lors du contrôle'} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
+        </div>
+        {#if deltaSolde}
+          <div class="p-3 rounded-xl border text-sm {nouveauSolde < 0 ? 'bg-red-50 border-red-200 text-red-700' : 'bg-emerald-50 border-emerald-100 text-emerald-800'}">
+            {#if nouveauSolde < 0}
+              Correction impossible : le solde deviendrait négatif ({nouveauSolde} UV).
+            {:else}
+              Nouveau solde : <span class="font-bold">{simSelectionnee.currentBalance ?? 0} {deltaSolde > 0 ? '+' : '−'} {Math.abs(deltaSolde)} = {nouveauSolde} UV</span>
+            {/if}
+          </div>
+        {/if}
+        <div class="flex gap-3">
+          <button onclick={() => afficherModalSolde = false} class="btn-secondary flex-1">{$t('common.cancel')}</button>
+          <button onclick={ajusterSolde} disabled={!deltaSolde || nouveauSolde < 0 || formSolde.description.trim().length < 2 || actionEnCours === 'solde'} class="btn-primary flex-1 justify-center">
+            {#if actionEnCours === 'solde'}<span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>{:else}
+              <span class="material-symbols-outlined icon-filled" style="font-size:16px">check_circle</span>Enregistrer
+            {/if}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}

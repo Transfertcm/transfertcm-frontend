@@ -43,6 +43,7 @@
   let descriptionUV = $state('')
   let durationMois = $state(1)
   let form = $state<any>({})
+  let sansLimiteMontant = $state(false)
 
   function formaterDate(d: string | null) {
     if (!d) return '—'
@@ -105,6 +106,7 @@
         maxDailyOrders: cabine.maxDailyOrders,
         maxOrderAmount: cabine.maxOrderAmount,
       }
+      sansLimiteMontant = cabine.maxOrderAmount === null || cabine.maxOrderAmount === undefined
     } catch {
       toast.erreur('Erreur', 'Cabine introuvable')
       goto('/admin/cabines')
@@ -201,6 +203,7 @@
       }
       if (payload.maxDailyOrders !== undefined) payload.maxDailyOrders = Number(payload.maxDailyOrders)
       if (payload.maxOrderAmount !== undefined) payload.maxOrderAmount = Number(payload.maxOrderAmount)
+      if (sansLimiteMontant) payload.maxOrderAmount = null
       await api.put(`/cabins/${id}`, payload)
       toast.succes('Cabine mise à jour')
       afficherModalEditer = false
@@ -915,7 +918,11 @@
           </div>
           <div>
             <label for="edit-maxamount" class="block text-xs font-semibold text-slate-600 mb-1.5">Montant max par commande (XAF)</label>
-            <input id="edit-maxamount" type="number" bind:value={form.maxOrderAmount} min="100" placeholder="Aucune limite" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
+            <input id="edit-maxamount" type="number" bind:value={form.maxOrderAmount} min="100" disabled={sansLimiteMontant} placeholder={sansLimiteMontant ? 'Aucune limite' : 'Ex : 50000'} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm disabled:bg-slate-50 disabled:text-slate-400" />
+            <label class="flex items-center gap-2 mt-1.5 text-xs text-slate-600 cursor-pointer">
+              <input type="checkbox" bind:checked={sansLimiteMontant} class="rounded border-slate-300" />
+              Aucune limite
+            </label>
           </div>
         </div>
         <div class="grid grid-cols-2 gap-4">

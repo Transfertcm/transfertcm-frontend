@@ -20,7 +20,7 @@
   let fraisEnEdition = $state(false)
   let fraisEdit = $state<number | string>(FRAIS_PAR_DEFAUT)
 
-  const estSuperAdmin = $derived(auth.user?.role === 'super_admin')
+  const peutAssigner = $derived(auth.peut('canViewSettings'))
   let admins = $state<any[]>([])
   let phoneASupprimer = $state<any>(null)
   let confirmationPhone = $state(false)
@@ -68,25 +68,22 @@
   }
 
   async function chargerAdmins() {
-    if (!estSuperAdmin) return
     try {
-      const res = await api.get('/admin/team')
+      const res = await api.get('/admin/directory')
       admins = res.data?.data ?? []
     } catch {}
   }
 
-  function messageErreur(e: any, defaut: string) {
-    const champs = e.response?.data?.errors
-    if (Array.isArray(champs) && champs.length) return champs.map((x: any) => x.message).join(' ')
-    return e.response?.data?.message ?? defaut
+  const libellesRoles: Record<string, string> = {
+    super_admin: 'Super admin',
+    admin: 'Admin',
+    service_client: 'Service client',
+    chef_agents_promo: 'Chef agents promo',
+    controleur_cabine: 'Contrôleur cabine',
   }
 
-  function nomAdmin(id: string | null) {
-    if (!id) return '—'
-    const a = admins.find((x: any) => x.id === id)
-    if (a) return a.fullName || a.email
-    if (id === auth.user?.id) return auth.user?.fullName || auth.user?.email || 'Vous'
-    return `Admin ${id.slice(-8)}`
+  function messageErreur(e: any, defaut: string) {
+    return e.response?.data?.message ?? defaut
   }
 
   function ouvrirEditionFrais() {
@@ -181,7 +178,7 @@
   }
 
   onMount(charger)
-  $effect(() => { if (estSuperAdmin) untrack(chargerAdmins) })
+  $effect(() => { if (peutAssigner) untrack(chargerAdmins) })
 </script>
 
 <svelte:head><title>Paramètres — TransfertCM Admin</title></svelte:head>
@@ -309,13 +306,11 @@
 <!-- ── Villes ───────────────────────────────────────────────────────────────── -->
 {:else if onglet === 'villes'}
   <div class="mb-4 flex justify-end">
-    {#if estSuperAdmin}
+    {#if peutAssigner}
       <button onclick={() => afficherModalVille = true} class="btn-primary">
         <span class="material-symbols-outlined icon-filled" style="font-size:16px">add</span>
         Assigner une ville
       </button>
-    {:else}
-      <p class="text-xs text-slate-400">L'assignation des villes est réservée au super administrateur.</p>
     {/if}
   </div>
   <div class="bg-white rounded-2xl border border-slate-100 card-shadow overflow-hidden">
@@ -324,7 +319,7 @@
     {:else if cityAssignments.length === 0}
       <div class="py-20 text-center">
         <p class="text-slate-600 font-semibold">Aucune assignation de ville</p>
-        {#if estSuperAdmin}
+        {#if peutAssigner}
           <button onclick={() => afficherModalVille = true} class="btn-primary mt-4">Assigner la première ville</button>
         {/if}
       </div>
@@ -337,15 +332,17 @@
             </div>
             <div class="flex-1">
               <p class="text-sm font-bold text-slate-900">{assign.city}</p>
-              <p class="text-xs text-slate-500">Admin : {nomAdmin(assign.adminUserId)}</p>
+              <p class="text-xs text-slate-500">Admin : {assign.adminName ?? '—'}</p>
             </div>
             <span class="text-xs font-semibold px-2.5 py-1 rounded-full {assign.isEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}">
               {assign.isEnabled ? 'Actif' : 'Inactif'}
             </span>
-            <button onclick={() => demanderSuppressionVille(assign)} disabled={actionEnCours === assign.id} title="Supprimer"
-              class="w-8 h-8 rounded-lg hover:bg-red-50 flex items-center justify-center text-slate-400 hover:text-red-500 disabled:opacity-50">
-              <span class="material-symbols-outlined" style="font-size:16px">delete</span>
-            </button>
+            {#if peutAssigner}
+              <button onclick={() => demanderSuppressionVille(assign)} disabled={actionEnCours === assign.id} title="Supprimer"
+                class="w-8 h-8 rounded-lg hover:bg-red-50 flex items-center justify-center text-slate-400 hover:text-red-500 disabled:opacity-50">
+                <span class="material-symbols-outlined" style="font-size:16px">delete</span>
+              </button>
+            {/if}
           </div>
         {/each}
       </div>
@@ -462,8 +459,8 @@
           <label for="vl-admin" class="block text-xs font-semibold text-slate-600 mb-1.5">Admin responsable *</label>
           <select id="vl-admin" bind:value={formVille.adminUserId} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
             <option value="">— Choisir un admin —</option>
-            {#each admins.filter((a) => a.isActive) as a}
-              <option value={a.id}>{a.fullName || a.email}{a.fullName ? ` (${a.email})` : ''}</option>
+            {#each admins as a}
+              <option value={a.id}>{a.fullName} · {libellesRoles[a.role] ?? 'Admin'}</option>
             {/each}
           </select>
         </div>
@@ -497,7 +494,7 @@
 <Modal bind:ouvert={confirmationVille} titre="Supprimer cette assignation ?" largeur="sm">
   <div class="p-6 space-y-4">
     <p class="text-sm text-slate-600">
-      <span class="font-semibold">{villeASupprimer?.city}</span> n'aura plus d'admin responsable ({nomAdmin(villeASupprimer?.adminUserId ?? null)}).
+      <span class="font-semibold">{villeASupprimer?.city}</span> n'aura plus d'admin responsable ({villeASupprimer?.adminName ?? '—'}).
     </p>
     <div class="flex gap-3">
       <button onclick={() => confirmationVille = false} class="btn-secondary flex-1">Annuler</button>

@@ -58,8 +58,6 @@
   }
 
   function messageErreur(e: any, defaut: string) {
-    const champs = e.response?.data?.errors
-    if (Array.isArray(champs) && champs.length) return champs.map((x: any) => x.message).join(' ')
     return e.response?.data?.message ?? defaut
   }
 
@@ -399,6 +397,7 @@
                       <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-semibold">Cet appareil</span>
                     {/if}
                   </div>
+                  <p class="text-xs text-slate-400">Adresse IP : <span class="font-mono">{sess.ipAddress ?? '—'}</span></p>
                   <p class="text-xs text-slate-400">Connecté le {formaterDate(sess.createdAt)}</p>
                   <p class="text-xs text-slate-400">Dernière activité : {formaterDate(sess.lastUsedAt)}</p>
                 </div>

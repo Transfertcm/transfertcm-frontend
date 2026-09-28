@@ -56,7 +56,9 @@
       modalPay = false
       await charger()
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible d\'enregistrer')
+      const champs = e.response?.data?.errors
+      const detail = Array.isArray(champs) && champs.length ? champs.map((x: any) => x.message).join(' ') : null
+      if (!e.toastAffiche) toast.erreur('Erreur', detail ?? e.response?.data?.message ?? 'Impossible d\'enregistrer')
     } finally {
       payEnCours = false
     }

@@ -155,7 +155,7 @@
       if (e.response?.status === 422 && Array.isArray(erreurs422) && erreurs422.length) {
         erreurForm = erreurs422.map((x: any) => x.message).join(' ')
       } else {
-        toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de sauvegarder')
+        if (!e.toastAffiche) toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de sauvegarder')
       }
     } finally { envoi = false }
   }
@@ -165,7 +165,7 @@
       await api.put(`/admin/tasks/${id}`, { status })
       taches = taches.map(t => t.id === id ? { ...t, status } : t)
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de mettre à jour')
+      if (!e.toastAffiche) toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de mettre à jour')
     }
   }
 
@@ -176,7 +176,7 @@
       toast.succes('Tâche supprimée')
       taches = taches.filter(t => t.id !== id)
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de supprimer')
+      if (!e.toastAffiche) toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de supprimer')
     } finally { suppressionEnCours = '' }
   }
 

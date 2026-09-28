@@ -7,8 +7,16 @@
   import Badge from '$lib/components/ui/Badge.svelte'
   import StatCard from '$lib/components/ui/StatCard.svelte'
   import { t } from '$lib/stores/locale'
+  import { auth } from '$lib/stores/auth.svelte'
 
   const id = $derived($page.params.id)
+  const peutGerer = $derived(auth.peut('canManageCabins'))
+
+  const canauxNotification: Record<string, string> = {
+    sms: 'SMS',
+    whatsapp: 'WhatsApp',
+    push: 'Notification push',
+  }
 
   let cabine = $state<any>(null)
   let stats = $state<any>(null)
@@ -95,6 +103,7 @@
         mtnNumber: cabine.mtnNumber,
         orangeNumber: cabine.orangeNumber,
         maxDailyOrders: cabine.maxDailyOrders,
+        maxOrderAmount: cabine.maxOrderAmount,
       }
     } catch {
       toast.erreur('Erreur', 'Cabine introuvable')
@@ -191,6 +200,7 @@
         payload[cle] = ['phone', 'mtnNumber', 'orangeNumber'].includes(cle) ? String(val).replace(/[\s\-]/g, '') : val
       }
       if (payload.maxDailyOrders !== undefined) payload.maxDailyOrders = Number(payload.maxDailyOrders)
+      if (payload.maxOrderAmount !== undefined) payload.maxOrderAmount = Number(payload.maxOrderAmount)
       await api.put(`/cabins/${id}`, payload)
       toast.succes('Cabine mise à jour')
       afficherModalEditer = false
@@ -226,6 +236,7 @@
   {#if cabine}
     <div class="flex items-center gap-2 flex-wrap">
       <Badge statut={cabine.paused && cabine.status === 'active' ? 'paused' : (cabine.status ?? 'inactive')} />
+      {#if peutGerer}
       <button onclick={() => afficherModalEditer = true} class="btn-secondary">
         <span class="material-symbols-outlined icon-filled" style="font-size:16px">edit</span>
         Modifier
@@ -260,6 +271,7 @@
           Réactiver
         </button>
       {/if}
+      {/if}
     </div>
   {/if}
 </div>
@@ -280,7 +292,8 @@
       sousTitre="Max : {cabine.maxDailyOrders ?? cabine.max_daily_orders ?? '∞'}" />
     <StatCard titre="Solde UV" valeur={cabine.uvBalance ?? cabine.uv_balance ?? 0} icone="bolt" couleur="jaune" />
     <StatCard titre="Total commandes" valeur={stats?.totals?.total ?? '—'} icone="bar_chart" couleur="bleu" />
-    <StatCard titre="Chiffre d'affaires" valeur={stats?.totals ? formaterMontant(stats.totals.totalAmount ?? 0) : '—'} icone="payments" couleur="vert" />
+    <StatCard titre="Chiffre d'affaires" valeur={stats?.totals ? formaterMontant(stats.totals.totalAmount ?? 0) : '—'} icone="payments" couleur="vert"
+      sousTitre={stats?.totals ? `Commandes complétées et payées${stats.totals.feesCollected !== undefined ? ` · Frais perçus : ${formaterMontant(stats.totals.feesCollected)}` : ''}` : ''} />
   </div>
 
   <div class="grid grid-cols-1 lg:grid-cols-3 stagger gap-5">
@@ -366,6 +379,22 @@
             <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Max commandes/jour</p>
             <p class="text-sm font-bold text-slate-900">{cabine.maxDailyOrders ?? cabine.max_daily_orders ?? '—'}</p>
           </div>
+          <div>
+            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Montant max par commande</p>
+            <p class="text-sm font-bold text-slate-900">{cabine.maxOrderAmount ? formaterMontant(cabine.maxOrderAmount) : 'Aucune limite'}</p>
+          </div>
+          <div>
+            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Quota de commandes</p>
+            <p class="text-sm font-bold text-slate-900">{cabine.totalOrdersQuota ? cabine.totalOrdersQuota : 'Aucun'}</p>
+          </div>
+          <div>
+            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Blocage quota</p>
+            <p class="text-sm font-bold {cabine.quotaBlocked ? 'text-red-600' : 'text-slate-900'}">{cabine.quotaBlocked ? 'Bloquée (quota atteint)' : 'Non bloquée'}</p>
+          </div>
+          <div>
+            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">Canal de notification</p>
+            <p class="text-sm font-bold text-slate-900">{cabine.notificationType ? (canauxNotification[cabine.notificationType] ?? cabine.notificationType) : '—'}</p>
+          </div>
         </div>
         <!-- Barre de progression quotidienne -->
         {#if (cabine.maxDailyOrders ?? cabine.max_daily_orders ?? 0) > 0}
@@ -425,13 +454,22 @@
           {#if expirationDepassee}
             <p class="text-xs text-red-600">La date d'expiration est dépassée.</p>
           {/if}
+          {#if cabine.autoRenew !== undefined && cabine.autoRenew !== null}
+            <div class="flex justify-between">
+              <span class="text-sm text-slate-500">Renouvellement auto.</span>
+              <span class="text-sm font-semibold text-slate-800">{cabine.autoRenew ? 'Activé' : 'Désactivé'}</span>
+            </div>
+            <p class="text-[11px] text-slate-400">Information seulement : aucun renouvellement n'est effectué automatiquement.</p>
+          {/if}
           {#if (cabine.subscriptionStatus ?? cabine.subscription_status ?? 'inactive') !== 'active'}
+            {#if peutGerer}
             <button onclick={() => afficherModalActiverAbo = true}
               class="w-full mt-1 px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 flex items-center justify-center gap-1.5">
               <span class="material-symbols-outlined icon-filled" style="font-size:16px">check_circle</span>
               Activer l'abonnement
             </button>
-          {:else}
+            {/if}
+          {:else if auth.peut('canManageSubscriptions')}
             <a href="/admin/abonnements?cabin={id}" class="block text-center text-xs text-orange-500 font-semibold hover:text-orange-600 mt-2">
               Gérer l'abonnement →
             </a>
@@ -439,10 +477,23 @@
         </div>
       </div>
 
+      {#if cabine.status === 'suspended'}
+        <div class="bg-red-50 border border-red-200 rounded-2xl p-5">
+          <p class="text-xs font-bold text-red-700 uppercase tracking-wide mb-2">Suspendue</p>
+          <p class="text-sm text-red-700">{cabine.suspensionReason ?? 'Aucune raison indiquée'}</p>
+          {#if cabine.suspensionDate}
+            <p class="text-xs text-red-600 mt-2">Depuis le {formaterDate(cabine.suspensionDate)}</p>
+          {/if}
+        </div>
+      {/if}
+
       {#if cabine.paused}
         <div class="bg-amber-50 border border-amber-200 rounded-2xl p-5">
           <p class="text-xs font-bold text-amber-700 uppercase tracking-wide mb-2">En pause</p>
           <p class="text-sm text-amber-700">{cabine.pauseReason ?? 'Aucune raison indiquée'}</p>
+          {#if cabine.pausedAt}
+            <p class="text-xs text-amber-600 mt-2">Depuis le {formaterDate(cabine.pausedAt)}</p>
+          {/if}
         </div>
       {/if}
 
@@ -497,7 +548,7 @@
                   <span class="text-sm font-semibold text-slate-800">{formaterDate(idCard.submittedAt)}</span>
                 </div>
               {/if}
-              {#if idCard.status === 'pending'}
+              {#if idCard.status === 'pending' && peutGerer}
                 <div class="flex gap-2 mt-1">
                   <button onclick={() => reviewDocument('approve')} disabled={chargementDoc}
                     class="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 disabled:opacity-50">
@@ -532,10 +583,17 @@
             <span class="text-slate-500">Dernière activité</span>
             <span class="font-semibold text-slate-800">{formaterDate(cabine.lastActivity ?? cabine.last_activity)}</span>
           </div>
+          {#if cabine.reactivatedAt}
+            <div class="flex justify-between">
+              <span class="text-slate-500">Dernière réactivation</span>
+              <span class="font-semibold text-slate-800">{formaterDate(cabine.reactivatedAt)}</span>
+            </div>
+          {/if}
         </div>
       </div>
 
       <!-- Lien commandes -->
+      {#if auth.peut('canViewOrders')}
       <a href="/admin/commandes?cabin={id}" class="flex items-center gap-3 bg-white rounded-2xl border border-slate-100 card-shadow p-4 hover:border-orange-200 transition-all group">
         <div class="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center shrink-0">
           <span class="material-symbols-outlined text-orange-500 icon-filled" style="font-size:20px">receipt_long</span>
@@ -546,6 +604,7 @@
         </div>
         <span class="material-symbols-outlined text-slate-300 group-hover:text-orange-400 transition-colors" style="font-size:18px">chevron_right</span>
       </a>
+      {/if}
     </div>
   </div>
 {/if}
@@ -748,7 +807,7 @@
           </div>
         </div>
 
-        {#if idCard.status === 'pending'}
+        {#if idCard.status === 'pending' && peutGerer}
           <!-- Actions -->
           <div class="border-t border-slate-100 pt-5">
             <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-4">Décision</p>
@@ -854,6 +913,12 @@
             <label for="edit-maxorders" class="block text-xs font-semibold text-slate-600 mb-1.5">Max commandes/jour</label>
             <input id="edit-maxorders" type="number" bind:value={form.maxDailyOrders} min="1" max="500" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
           </div>
+          <div>
+            <label for="edit-maxamount" class="block text-xs font-semibold text-slate-600 mb-1.5">Montant max par commande (XAF)</label>
+            <input id="edit-maxamount" type="number" bind:value={form.maxOrderAmount} min="100" placeholder="Aucune limite" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
           <div>
             <p class="block text-xs font-semibold text-slate-600 mb-1.5">Type</p>
             <p class="px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-100 text-sm text-slate-600">{cabine?.type ? $t(`admin.cabins.type.${cabine.type}`) : '—'}</p>

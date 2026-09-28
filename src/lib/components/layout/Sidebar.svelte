@@ -8,6 +8,7 @@
   import { toast } from '$lib/stores/toast.svelte'
   import { t, translate } from '$lib/stores/locale'
   import api from '$lib/api'
+  import { accesDePage } from '$lib/permissions'
 
   let { reduit = $bindable(false) } = $props()
 
@@ -53,6 +54,10 @@
 
   const role = $derived(auth.user?.role ?? 'admin')
 
+  function visible(href: string) {
+    return auth.aAcces(accesDePage(href))
+  }
+
   const libellesRoles: Record<string, string> = {
     super_admin: 'Super admin',
     admin: 'Admin',
@@ -62,15 +67,15 @@
   }
 
   // Liens directs (sans sous-menu)
-  type LienDirect = { href: string; icone: string; labelKey: string; badge: number; roles: string[] }
+  type LienDirect = { href: string; icone: string; labelKey: string; badge: number }
   const liensDirects = $derived<LienDirect[]>([
-    { href: '/admin/tableau-de-bord', icone: 'grid_view', labelKey: 'admin.nav.dashboard', badge: 0, roles: ['super_admin','admin','service_client','chef_agents_promo','controleur_cabine'] },
-    { href: '/admin/parametres',      icone: 'settings',  labelKey: 'admin.nav.settings',  badge: 0, roles: ['super_admin','admin'] },
-  ].filter(l => l.roles.includes(role)))
+    { href: '/admin/tableau-de-bord', icone: 'grid_view', labelKey: 'admin.nav.dashboard', badge: 0 },
+    { href: '/admin/parametres',      icone: 'settings',  labelKey: 'admin.nav.settings',  badge: 0 },
+  ].filter(l => visible(l.href)))
 
   // Groupes avec sous-menus
-  type SousMenu = { href: string; icone: string; label: string; desc: string; badge?: number; roles: string[] }
-  type Groupe = { key: string; icone: string; label: string; couleur: string; roles: string[]; items: SousMenu[] }
+  type SousMenu = { href: string; icone: string; label: string; desc: string; badge?: number }
+  type Groupe = { key: string; icone: string; label: string; couleur: string; items: SousMenu[] }
 
   const groupes = $derived<Groupe[]>([
     {
@@ -78,64 +83,60 @@
       icone: 'store_mall_directory',
       label: 'Réseau de cabines',
       couleur: '#3b82f6',
-      roles: ['super_admin','admin','controleur_cabine'],
       items: [
-        { href: '/admin/abonnements', icone: 'card_membership', label: 'Abonnements',    desc: 'Plans & facturation des cabines', roles: ['super_admin','admin','controleur_cabine'] },
-        { href: '/admin/cabines',     icone: 'store',           label: 'Cabines',         desc: 'Points de collecte physiques',   roles: ['super_admin','admin','controleur_cabine'] },
-        { href: '/admin/uv',          icone: 'bolt',            label: 'UV',              desc: 'Unités de valeur (crédit)',       roles: ['super_admin','admin'] },
-      ].filter(i => i.roles.includes(role)),
+        { href: '/admin/abonnements', icone: 'card_membership', label: 'Abonnements',    desc: 'Plans & facturation des cabines' },
+        { href: '/admin/cabines',     icone: 'store',           label: 'Cabines',         desc: 'Points de collecte physiques' },
+        { href: '/admin/uv',          icone: 'bolt',            label: 'UV',              desc: 'Unités de valeur (crédit)' },
+      ].filter(i => visible(i.href)),
     },
     {
       key: 'operations',
       icone: 'hub',
       label: 'Opérations',
       couleur: '#007A5E',
-      roles: ['super_admin','admin','controleur_cabine','chef_agents_promo'],
       items: [
-        { href: '/admin/commandes',    icone: 'receipt_long', label: 'Commandes',     desc: 'Transferts clients en cours',    roles: ['super_admin','admin','controleur_cabine'] },
-        { href: '/admin/packages',     icone: 'inventory_2',  label: 'Forfaits',       desc: 'Catalogue forfaits MTN & Orange', roles: ['super_admin','admin'] },
-        { href: '/admin/agents-promo', icone: 'groups',       label: 'Agents promo',  desc: 'Agents terrain & recrutement',  roles: ['super_admin','admin','chef_agents_promo'] },
-      ].filter(i => i.roles.includes(role)),
+        { href: '/admin/commandes',    icone: 'receipt_long', label: 'Commandes',     desc: 'Transferts clients en cours' },
+        { href: '/admin/finance',      icone: 'account_balance', label: 'Réconciliation', desc: 'À livrer, à rembourser, remboursées' },
+        { href: '/admin/packages',     icone: 'inventory_2',  label: 'Forfaits',       desc: 'Catalogue forfaits MTN & Orange' },
+        { href: '/admin/agents-promo', icone: 'groups',       label: 'Agents promo',  desc: 'Agents terrain & recrutement' },
+      ].filter(i => visible(i.href)),
     },
     {
       key: 'clients',
       icone: 'support_agent',
       label: 'Relation client',
       couleur: '#8b5cf6',
-      roles: ['super_admin','admin','service_client'],
       items: [
-        { href: '/admin/reclamations', icone: 'report_problem', label: 'Réclamations', desc: 'Plaintes & litiges clients',    roles: ['super_admin','admin','service_client'] },
-        { href: '/admin/messagerie',   icone: 'chat_bubble',    label: 'Messagerie',   desc: 'Chat interne & avec cabines',  roles: ['super_admin','admin','service_client'] },
-        { href: '/admin/support',      icone: 'help_center',    label: 'Support',      desc: 'Tickets support clients',      roles: ['super_admin','admin','service_client'] },
-        { href: '/admin/call-center',  icone: 'call',           label: 'Call Center',  desc: 'Journal & appels téléphoniques', roles: ['super_admin','admin','service_client'] },
-        { href: '/admin/fraude',       icone: 'security',       label: 'Fraude',       desc: 'Anti-fraude & liste noire',   roles: ['super_admin','admin'] },
-      ].filter(i => i.roles.includes(role)),
+        { href: '/admin/reclamations', icone: 'report_problem', label: 'Réclamations', desc: 'Plaintes & litiges clients' },
+        { href: '/admin/messagerie',   icone: 'chat_bubble',    label: 'Messagerie',   desc: 'Chat interne & avec cabines' },
+        { href: '/admin/support',      icone: 'help_center',    label: 'Support',      desc: 'Tickets support clients' },
+        { href: '/admin/call-center',  icone: 'call',           label: 'Call Center',  desc: 'Journal & appels téléphoniques' },
+        { href: '/admin/fraude',       icone: 'security',       label: 'Fraude',       desc: 'Anti-fraude & liste noire' },
+      ].filter(i => visible(i.href)),
     },
     {
       key: 'reporting',
       icone: 'analytics',
       label: 'Suivi & reporting',
       couleur: '#10b981',
-      roles: ['super_admin','admin','service_client','chef_agents_promo','controleur_cabine'],
       items: [
-        { href: '/admin/notifications', icone: 'notifications', label: 'Notifications', desc: 'Alertes temps réel',         badge: notifCount, roles: ['super_admin','admin','service_client','chef_agents_promo','controleur_cabine'] },
-        { href: '/admin/taches',        icone: 'task_alt',      label: 'Tâches',        desc: 'Tâches internes de l\'équipe', roles: ['super_admin','admin'] },
-        { href: '/admin/rapports',      icone: 'bar_chart',     label: 'Rapports',      desc: 'Bilans & statistiques',      roles: ['super_admin','admin'] },
-      ].filter(i => i.roles.includes(role)),
+        { href: '/admin/notifications', icone: 'notifications', label: 'Notifications', desc: 'Alertes temps réel',         badge: notifCount },
+        { href: '/admin/taches',        icone: 'task_alt',      label: 'Tâches',        desc: 'Tâches internes de l\'équipe' },
+        { href: '/admin/rapports',      icone: 'bar_chart',     label: 'Rapports',      desc: 'Bilans & statistiques' },
+      ].filter(i => visible(i.href)),
     },
     {
       key: 'equipe',
       icone: 'people',
       label: 'Équipe',
       couleur: '#ec4899',
-      roles: ['super_admin','admin','service_client','chef_agents_promo','controleur_cabine'],
       items: [
-        { href: '/admin/salaires',      icone: 'payments',        label: 'Salaires',      desc: 'Sessions de travail & paiements',      roles: ['super_admin','admin','service_client','chef_agents_promo','controleur_cabine'] },
-        { href: '/admin/remunerations', icone: 'store',           label: 'Rémunérations', desc: 'Payer les cabines selon leur chiffre', roles: ['super_admin','admin'] },
-        { href: '/admin/equipe',        icone: 'manage_accounts', label: 'Équipe',        desc: 'Comptes & rôles administrateurs',       roles: ['super_admin'] },
-      ].filter(i => i.roles.includes(role)),
+        { href: '/admin/salaires',      icone: 'payments',        label: 'Salaires',      desc: 'Sessions de travail & paiements' },
+        { href: '/admin/remunerations', icone: 'store',           label: 'Rémunérations', desc: 'Payer les cabines selon leur chiffre' },
+        { href: '/admin/equipe',        icone: 'manage_accounts', label: 'Équipe',        desc: 'Comptes & rôles administrateurs' },
+      ].filter(i => visible(i.href)),
     },
-  ].filter(g => g.roles.includes(role) && g.items.length > 0))
+  ].filter(g => g.items.length > 0))
 
   function estActif(href: string) {
     return $page.url.pathname === href || $page.url.pathname.startsWith(href + '/')

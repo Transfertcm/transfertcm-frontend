@@ -1,6 +1,15 @@
 <script lang="ts">
   import api from '$lib/api'
   import { toast } from '$lib/stores/toast.svelte'
+  import { auth } from '$lib/stores/auth.svelte'
+
+  const peutValider = $derived(auth.peut('canValidateReports'))
+
+  function messageErreur(e: any, defaut: string) {
+    const champs = e.response?.data?.errors
+    if (Array.isArray(champs) && champs.length) return champs.map((x: any) => x.message).join(' ')
+    return e.response?.data?.message ?? defaut
+  }
 
   type Onglet = 'finances' | 'rapports' | 'budgets'
   let onglet = $state<Onglet>('finances')
@@ -122,7 +131,7 @@
       afficherDetailRapport = false
       await chargerRapports()
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de valider')
+      if (!e.toastAffiche) toast.erreur('Erreur', messageErreur(e, 'Impossible de valider'))
     } finally { actionEnCours = '' }
   }
 
@@ -135,7 +144,7 @@
       raisonRejet = ''
       await chargerRapports()
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de rejeter')
+      if (!e.toastAffiche) toast.erreur('Erreur', messageErreur(e, 'Impossible de rejeter'))
     } finally { actionEnCours = '' }
   }
 
@@ -148,7 +157,7 @@
       formRapport = { title: '', introduction: '', workDone: '', conclusions: '' }
       await chargerRapports()
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de créer')
+      if (!e.toastAffiche) toast.erreur('Erreur', messageErreur(e, 'Impossible de créer'))
     } finally { actionEnCours = '' }
   }
 
@@ -164,7 +173,7 @@
       formBudget = { object: '', estimatedAmount: '', justification: '', priority: 'medium' }
       await chargerBudgets()
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de créer')
+      if (!e.toastAffiche) toast.erreur('Erreur', messageErreur(e, 'Impossible de créer'))
     } finally { actionEnCours = '' }
   }
 
@@ -175,7 +184,7 @@
       toast.succes('Budget approuvé')
       await chargerBudgets()
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible d\'approuver')
+      if (!e.toastAffiche) toast.erreur('Erreur', messageErreur(e, 'Impossible d\'approuver'))
     } finally { actionEnCours = '' }
   }
 
@@ -252,9 +261,9 @@
     <!-- KPIs -->
     <div class="grid grid-cols-2 md:grid-cols-4 stagger gap-4 mb-5">
       {#each [
-        { label: 'Total encaissé (frais inclus)', val: formaterMontant(finances.totals?.totalRevenue ?? 0), icone: 'payments', couleur: '#10b981' },
+        { label: 'Total encaissé (frais inclus)', val: formaterMontant(finances.totals?.totalCollected ?? 0), icone: 'payments', couleur: '#10b981' },
         { label: 'Montant transféré', val: formaterMontant(finances.totals?.totalAmount ?? 0), icone: 'swap_horiz', couleur: '#007A5E' },
-        { label: 'Frais de service perçus', val: formaterMontant((finances.totals?.totalRevenue ?? 0) - (finances.totals?.totalAmount ?? 0)), icone: 'account_balance', couleur: '#8b5cf6' },
+        { label: 'Frais de service perçus', val: formaterMontant(finances.totals?.feesCollected ?? 0), icone: 'account_balance', couleur: '#8b5cf6' },
         { label: 'Commandes complétées', val: finances.totals?.totalOrders ?? 0, icone: 'check_circle', couleur: '#3b82f6' },
       ] as kpi}
         <div class="bg-white rounded-2xl border border-slate-100 card-shadow p-5">
@@ -430,7 +439,7 @@
             </div>
             <p class="text-sm font-bold text-slate-900 shrink-0">{formaterMontant(bud.estimatedAmount)}</p>
             <span class="text-xs font-semibold px-2.5 py-1 rounded-full border {cfg.classe} shrink-0">{cfg.label}</span>
-            {#if bud.status === 'pending' || bud.status === 'draft'}
+            {#if peutValider && (bud.status === 'pending' || bud.status === 'draft')}
               <button onclick={() => approuverBudget(bud.id)} disabled={actionEnCours === bud.id}
                 class="text-xs px-2.5 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 font-semibold hover:bg-emerald-100 disabled:opacity-50 shrink-0">
                 {actionEnCours === bud.id ? '...' : 'Approuver'}
@@ -478,7 +487,7 @@
             <p class="text-sm text-red-600 leading-relaxed">{rapportSelectionne.rejectionReason}</p>
           </div>
         {/if}
-        {#if rapportSelectionne.status === 'pending'}
+        {#if peutValider && rapportSelectionne.status === 'pending'}
           <div class="border-t border-slate-100 pt-4 space-y-3">
             <div>
               <label for="raison-rejet-rap" class="block text-xs font-semibold text-slate-600 mb-1.5">Raison de rejet (si rejet)</label>

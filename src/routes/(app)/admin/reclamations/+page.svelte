@@ -88,7 +88,7 @@
       resolutionNotes = ''
       await charger()
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de résoudre')
+      toast.erreur('Erreur', e.response?.data?.errors?.[0]?.message ?? e.response?.data?.message ?? 'Impossible de résoudre')
     } finally {
       actionEnCours = ''
     }
@@ -104,7 +104,7 @@
       raisonRejet = ''
       await charger()
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de rejeter')
+      toast.erreur('Erreur', e.response?.data?.errors?.[0]?.message ?? e.response?.data?.message ?? 'Impossible de rejeter')
     } finally {
       actionEnCours = ''
     }
@@ -119,7 +119,7 @@
       afficherDetail = false
       await charger()
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible d\'archiver')
+      toast.erreur('Erreur', e.response?.data?.errors?.[0]?.message ?? e.response?.data?.message ?? 'Impossible d\'archiver')
     } finally {
       actionEnCours = ''
     }

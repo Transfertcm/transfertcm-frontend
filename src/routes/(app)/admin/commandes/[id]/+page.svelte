@@ -4,6 +4,7 @@
   import { goto } from '$app/navigation'
   import api from '$lib/api'
   import { toast } from '$lib/stores/toast.svelte'
+  import { auth } from '$lib/stores/auth.svelte'
   import Badge, { libelleStatut, libelleService } from '$lib/components/ui/Badge.svelte'
 
   const id = $derived($page.params.id)
@@ -72,8 +73,17 @@
     toast.succes('Lien copié')
   }
 
+  const statutsRemboursables = ['completed', 'in_progress', 'rejected', 'cancelled', 'expired', 'payment_failed', 'payment_timeout']
+
   const peutAssigner = $derived(
-    !!commande && !commande.cabinId && ['pending_admin_review', 'admin_approved', 'returned_to_admin'].includes(commande.status)
+    auth.peut('canAssignOrders') && !!commande && !commande.cabinId && ['pending_admin_review', 'admin_approved', 'returned_to_admin'].includes(commande.status)
+  )
+  const peutValiderPaiement = $derived(
+    auth.peut('canValidatePayments') && !!commande && ['awaiting_payment', 'pending_payment'].includes(commande.status)
+  )
+  const peutRembourser = $derived(
+    auth.peut('canRefundOrders') && !!commande && !!commande.paymentVerified && !commande.refundedAt &&
+    statutsRemboursables.includes(commande.status)
   )
   const peutCreerLien = $derived(
     !!commande && !!commande.amount && !commande.paymentVerified &&
@@ -195,6 +205,7 @@
   }
 
   async function voirScores() {
+    if (!auth.peut('canAssignOrders')) return
     actionEnCours = 'scores'
     try {
       const res = await api.get(`/admin/orders/${id}/cabin-scores`)
@@ -258,13 +269,13 @@
           Lien paiement
         </button>
       {/if}
-      {#if commande.status === 'awaiting_payment' || commande.status === 'pending_payment'}
+      {#if peutValiderPaiement}
         <button onclick={() => afficherModalPaiement = true} class="btn-secondary">
           <span class="material-symbols-outlined icon-filled" style="font-size:16px">verified</span>
           Valider paiement
         </button>
       {/if}
-      {#if ['completed', 'in_progress'].includes(commande.status)}
+      {#if peutRembourser}
         <button onclick={() => afficherModalRemboursement = true} class="px-3 py-2 rounded-xl border border-red-200 text-red-600 text-sm font-semibold hover:bg-red-50 flex items-center gap-1.5">
           <span class="material-symbols-outlined icon-filled" style="font-size:16px">currency_exchange</span>
           Rembourser
@@ -473,9 +484,11 @@
                 </div>
               {/if}
             </div>
-            <a href="/admin/cabines/{cab.id}" class="block text-center text-xs text-orange-500 font-semibold hover:text-orange-600 mt-2">
-              Voir la cabine →
-            </a>
+            {#if auth.peut('canManageCabins')}
+              <a href="/admin/cabines/{cab.id}" class="block text-center text-xs text-orange-500 font-semibold hover:text-orange-600 mt-2">
+                Voir la cabine →
+              </a>
+            {/if}
           </div>
         {:else}
           <div class="p-5 text-center">
@@ -643,7 +656,7 @@
       </div>
       <div class="p-6 space-y-4">
         <p class="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
-          Cette action est irréversible. Le client sera remboursé du montant de la commande.
+          Cette action est irréversible. Le client sera remboursé du montant payé, frais compris.
         </p>
         <div>
           <label for="raison-remboursement" class="block text-xs font-semibold text-slate-600 mb-1.5">Raison du remboursement *</label>

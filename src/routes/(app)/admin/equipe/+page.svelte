@@ -3,6 +3,7 @@
   import api from '$lib/api'
   import { toast } from '$lib/stores/toast.svelte'
   import { auth, type AdminRole } from '$lib/stores/auth.svelte'
+  import type { Permission } from '$lib/permissions'
 
   type AdminMember = {
     id: string
@@ -26,8 +27,38 @@
   // Modal édition
   let modalEditer = $state(false)
   let adminEnEdition = $state<AdminMember | null>(null)
-  let formEditer = $state({ fullName: '', role: 'admin' as AdminRole, isActive: true })
+  let formEditer = $state({ fullName: '', role: 'admin' as AdminRole, isActive: true, password: '' })
   let envoiEditer = $state(false)
+  let erreurEditer = $state('')
+
+  type DonneesPermissions = {
+    userId: string
+    role: AdminRole
+    customized: boolean
+    permissions: Record<Permission, boolean>
+    roleDefaults: Record<Permission, boolean>
+    labels: Record<Permission, string>
+  }
+  let adminPermissions = $state<AdminMember | null>(null)
+  let donneesPermissions = $state<DonneesPermissions | null>(null)
+  let permissionsEditees = $state<Record<string, boolean>>({})
+  let chargementPermissions = $state(false)
+  let envoiPermissions = $state('')
+  let erreurPermissions = $state('')
+
+  const clesPermissions = $derived(
+    donneesPermissions ? (Object.keys(donneesPermissions.labels) as Permission[]) : []
+  )
+  const changementsPermissions = $derived(
+    donneesPermissions
+      ? Object.fromEntries(
+          clesPermissions
+            .filter((k) => permissionsEditees[k] !== donneesPermissions!.permissions[k])
+            .map((k) => [k, permissionsEditees[k]])
+        )
+      : {}
+  )
+  const nbChangements = $derived(Object.keys(changementsPermissions).length)
 
   // Confirmation suppression
   let adminASupprimer = $state<AdminMember | null>(null)
@@ -52,7 +83,7 @@
     chargement = true
     try {
       const res = await api.get('/admin/team')
-      equipe = (res.data?.data ?? []).filter((a: AdminMember) => (a.role as string) !== 'cabin')
+      equipe = res.data?.data ?? []
     } catch {
       toast.erreur('Erreur', 'Impossible de charger l\'équipe')
     } finally {
@@ -60,8 +91,10 @@
     }
   }
 
-  const libellesChamps: Record<string, string> = {
-    fullName: 'Nom complet', email: 'Email', password: 'Mot de passe', role: 'Rôle',
+  function messageErreur(e: any, defaut: string) {
+    const champs = e.response?.data?.errors
+    if (Array.isArray(champs) && champs.length) return champs.map((x: any) => x.message).join(' ')
+    return e.response?.data?.message ?? defaut
   }
 
   function ouvrirCreation() {
@@ -87,12 +120,7 @@
       formCreer = { fullName: '', email: '', password: '', role: 'admin' }
       toast.succes('Admin créé', `${cree.fullName} peut maintenant se connecter.`)
     } catch (e: any) {
-      const champs = e.response?.data?.errors
-      if (e.response?.status === 422 && Array.isArray(champs) && champs.length) {
-        erreurCreer = 'Champ(s) invalide(s) : ' + [...new Set(champs.map((x: any) => libellesChamps[x.field] ?? x.field))].join(', ')
-      } else {
-        erreurCreer = e.response?.data?.message ?? 'Impossible de créer le compte'
-      }
+      erreurCreer = messageErreur(e, 'Impossible de créer le compte')
     } finally {
       envoiCreer = false
     }
@@ -100,12 +128,14 @@
 
   function ouvrirEdition(admin: AdminMember) {
     adminEnEdition = admin
-    formEditer = { fullName: admin.fullName ?? '', role: admin.role, isActive: admin.isActive }
+    formEditer = { fullName: admin.fullName ?? '', role: admin.role, isActive: admin.isActive, password: '' }
+    erreurEditer = ''
     modalEditer = true
   }
 
   async function sauvegarderEdition() {
     if (!adminEnEdition) return
+    erreurEditer = ''
     envoiEditer = true
     try {
       const payload: any = {
@@ -113,12 +143,14 @@
         role: formEditer.role,
         isActive: formEditer.isActive,
       }
+      if (formEditer.password) payload.password = formEditer.password
       const res = await api.put(`/admin/team/${adminEnEdition.id}`, payload)
       equipe = equipe.map(a => a.id === adminEnEdition!.id ? { ...a, ...res.data?.data } : a)
       modalEditer = false
-      toast.succes('Compte mis à jour')
+      toast.succes('Compte mis à jour', payload.password ? 'Le nouveau mot de passe est actif.' : undefined)
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de modifier')
+      if (e.response?.status === 422) erreurEditer = messageErreur(e, 'Impossible de modifier')
+      else if (!e.toastAffiche) toast.erreur('Erreur', messageErreur(e, 'Impossible de modifier'))
     } finally {
       envoiEditer = false
     }
@@ -136,6 +168,56 @@
       toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de supprimer')
     } finally {
       suppressionEnCours = false
+    }
+  }
+
+  async function ouvrirPermissions(admin: AdminMember) {
+    adminPermissions = admin
+    donneesPermissions = null
+    erreurPermissions = ''
+    chargementPermissions = true
+    try {
+      const res = await api.get(`/admin/team/${admin.id}/permissions`)
+      appliquerPermissions(res.data?.data ?? null)
+    } catch (e: any) {
+      erreurPermissions = messageErreur(e, 'Impossible de charger les permissions')
+    } finally {
+      chargementPermissions = false
+    }
+  }
+
+  function appliquerPermissions(d: DonneesPermissions | null) {
+    donneesPermissions = d
+    permissionsEditees = d ? { ...d.permissions } : {}
+  }
+
+  async function enregistrerPermissions() {
+    if (!adminPermissions || nbChangements === 0) return
+    erreurPermissions = ''
+    envoiPermissions = 'enregistrer'
+    try {
+      const res = await api.put(`/admin/team/${adminPermissions.id}/permissions`, changementsPermissions)
+      appliquerPermissions(res.data?.data ?? null)
+      toast.succes('Permissions enregistrées', `Elles s'appliquent dès la prochaine action de ${adminPermissions.fullName ?? adminPermissions.email}.`)
+    } catch (e: any) {
+      erreurPermissions = messageErreur(e, 'Impossible d\'enregistrer les permissions')
+    } finally {
+      envoiPermissions = ''
+    }
+  }
+
+  async function reinitialiserPermissions() {
+    if (!adminPermissions) return
+    erreurPermissions = ''
+    envoiPermissions = 'reinitialiser'
+    try {
+      const res = await api.delete(`/admin/team/${adminPermissions.id}/permissions`)
+      appliquerPermissions(res.data?.data ?? null)
+      toast.succes('Permissions du rôle rétablies')
+    } catch (e: any) {
+      erreurPermissions = messageErreur(e, 'Impossible de rétablir les permissions')
+    } finally {
+      envoiPermissions = ''
     }
   }
 
@@ -227,6 +309,13 @@
               {#if admin.role !== 'super_admin' && admin.id !== auth.user?.id}
                 <div class="flex justify-end gap-1">
                   <button
+                    onclick={() => ouvrirPermissions(admin)}
+                    class="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors"
+                    title="Permissions"
+                  >
+                    <span class="material-symbols-outlined" style="font-size:16px">admin_panel_settings</span>
+                  </button>
+                  <button
                     onclick={() => ouvrirEdition(admin)}
                     class="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors"
                     title="Modifier"
@@ -256,13 +345,17 @@
 
 <!-- Encadré explications rôles -->
 <div class="mt-6 bg-slate-50 rounded-2xl border border-slate-100 p-5">
-  <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Accès par rôle</p>
+  <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Accès par rôle (par défaut)</p>
+  <p class="text-xs text-slate-400 mb-3">
+    Tous les rôles ont accès au tableau de bord, aux notifications, à la messagerie interne, à leurs propres salaires et à leur profil.
+    Les permissions d'un compte peuvent être personnalisées avec le bouton « Permissions » ; changer son rôle efface cette personnalisation.
+  </p>
   <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
     {#each [
-      { role: 'admin',             label: 'Admin',             desc: 'Accès complet sauf gestion équipe' },
-      { role: 'service_client',    label: 'Service client',    desc: 'Support, messagerie, réclamations' },
+      { role: 'admin',             label: 'Admin',             desc: 'Tout, sauf la gestion de l\'équipe et les salaires de l\'équipe' },
+      { role: 'service_client',    label: 'Service client',    desc: 'Réclamations et support client, call center, messagerie avec les cabines' },
       { role: 'chef_agents_promo', label: 'Chef agents promo', desc: 'Agents promo uniquement' },
-      { role: 'controleur_cabine', label: 'Contrôleur cabine', desc: 'Cabines, commandes, abonnements' },
+      { role: 'controleur_cabine', label: 'Contrôleur cabine', desc: 'Commandes (attribution, validation de paiement), cabines, abonnements et rémunérations' },
     ] as item}
       <div class="bg-white rounded-xl border border-slate-100 px-4 py-3">
         <span class="text-xs font-bold px-2 py-0.5 rounded-full {couleurRole(item.role as AdminRole)} mb-1.5 inline-block">
@@ -355,6 +448,14 @@
               <option value={r.value}>{r.label}</option>
             {/each}
           </select>
+          {#if formEditer.role !== adminEnEdition.role}
+            <p class="text-xs text-amber-600 mt-1.5">Changer le rôle remplace les permissions personnalisées de ce compte par celles du nouveau rôle.</p>
+          {/if}
+        </div>
+        <div>
+          <label for="edit-mdp" class="block text-xs font-semibold text-slate-600 mb-1.5">Nouveau mot de passe (laisser vide pour ne pas changer)</label>
+          <input id="edit-mdp" bind:value={formEditer.password} type="password" placeholder="Min. 8 caractères" autocomplete="new-password"
+            class="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-orange-300" />
         </div>
         <div>
           <label class="block text-xs font-semibold text-slate-600 mb-1.5">Statut du compte</label>
@@ -373,6 +474,9 @@
             </button>
           </div>
         </div>
+        {#if erreurEditer}
+          <p class="text-red-500 text-xs">{erreurEditer}</p>
+        {/if}
         <div class="flex gap-2 pt-2">
           <button onclick={() => modalEditer = false}
             class="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-600 hover:bg-slate-50">
@@ -388,6 +492,88 @@
           </button>
         </div>
       </div>
+    </div>
+  </div>
+{/if}
+
+{#if adminPermissions}
+  <div class="fixed inset-0 z-50 grid place-items-center p-4 bg-black/30">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
+      <div class="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
+        <div>
+          <h3 class="font-bold text-slate-900">Permissions — {adminPermissions.fullName ?? adminPermissions.email}</h3>
+          <div class="flex items-center gap-2 mt-1">
+            <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold {couleurRole(adminPermissions.role)}">{labelRole(adminPermissions.role)}</span>
+            {#if donneesPermissions}
+              {#if donneesPermissions.customized}
+                <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-700">Personnalisées</span>
+              {:else}
+                <span class="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-500">Permissions du rôle</span>
+              {/if}
+            {/if}
+          </div>
+        </div>
+        <button onclick={() => adminPermissions = null} class="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400">
+          <span class="material-symbols-outlined" style="font-size:18px">close</span>
+        </button>
+      </div>
+      <div class="p-6 overflow-y-auto space-y-1">
+        {#if chargementPermissions}
+          {#each Array(6) as _}
+            <div class="skeleton h-10 rounded-xl mb-2"></div>
+          {/each}
+        {:else if donneesPermissions}
+          <p class="text-xs text-slate-400 mb-3">
+            « Rôle : oui / non » indique la valeur par défaut du rôle. Changer le rôle de ce compte efface sa personnalisation.
+          </p>
+          {#each clesPermissions as cle}
+            {@const actif = permissionsEditees[cle] === true}
+            {@const defaut = donneesPermissions.roleDefaults[cle] === true}
+            <div class="flex items-center justify-between gap-3 py-2 border-b border-slate-50 last:border-0">
+              <div class="min-w-0">
+                <p class="text-sm text-slate-700">{donneesPermissions.labels[cle]}</p>
+                <p class="text-[11px] {actif !== defaut ? 'text-amber-600 font-semibold' : 'text-slate-400'}">
+                  Rôle : {defaut ? 'oui' : 'non'}{actif !== defaut ? ' · modifié' : ''}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={actif}
+                aria-label={donneesPermissions.labels[cle]}
+                onclick={() => permissionsEditees[cle] = !actif}
+                class="relative w-10 h-6 rounded-full transition-colors shrink-0 {actif ? 'bg-emerald-500' : 'bg-slate-200'}"
+              >
+                <span class="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform {actif ? 'translate-x-4' : ''}"></span>
+              </button>
+            </div>
+          {/each}
+        {/if}
+        {#if erreurPermissions}
+          <p class="text-red-500 text-xs pt-2">{erreurPermissions}</p>
+        {/if}
+      </div>
+      {#if donneesPermissions}
+        <div class="px-6 py-4 border-t border-slate-100 flex flex-wrap gap-2">
+          <button onclick={reinitialiserPermissions} disabled={!donneesPermissions.customized || envoiPermissions !== ''}
+            class="px-3 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-40">
+            {envoiPermissions === 'reinitialiser' ? '...' : 'Revenir aux permissions du rôle'}
+          </button>
+          <div class="flex-1"></div>
+          <button onclick={() => adminPermissions = null}
+            class="px-4 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-600 hover:bg-slate-50">
+            Fermer
+          </button>
+          <button onclick={enregistrerPermissions} disabled={nbChangements === 0 || envoiPermissions !== ''}
+            class="px-4 py-2.5 rounded-xl bg-orange-500 text-white text-sm font-semibold hover:bg-orange-600 disabled:opacity-50 flex items-center justify-center gap-2">
+            {#if envoiPermissions === 'enregistrer'}
+              <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+            {:else}
+              Enregistrer{nbChangements > 0 ? ` (${nbChangements})` : ''}
+            {/if}
+          </button>
+        </div>
+      {/if}
     </div>
   </div>
 {/if}

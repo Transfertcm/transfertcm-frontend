@@ -47,7 +47,11 @@ api.interceptors.response.use(
       const isCritical = !url.includes('notifications') && !url.includes('messages')
       if (isCritical) {
         auth.logout()
-        sessionStorage.setItem('tcm_auth_error', 'Session expirée — veuillez vous reconnecter.')
+        const motif = err.response?.data?.message
+        sessionStorage.setItem(
+          'tcm_auth_error',
+          motif && !/connectez-vous/i.test(motif) ? motif : 'Session expirée — veuillez vous reconnecter.'
+        )
         goto('/login')
         err.toastAffiche = true
       }

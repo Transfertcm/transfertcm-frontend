@@ -5,7 +5,12 @@
   import { toast } from '$lib/stores/toast.svelte'
 
   type Onglet = 'cabines' | 'admins' | 'groupe'
-  let onglet = $state<Onglet>('cabines')
+  const peutCabines = $derived(auth.peut('canMessageCabins'))
+  let onglet = $state<Onglet>(auth.peut('canMessageCabins') ? 'cabines' : 'admins')
+  const onglets = $derived(
+    ([['cabines', 'store', 'Cabines'], ['admins', 'admin_panel_settings', 'Admins'], ['groupe', 'groups', 'Groupe']] as const)
+      .filter(([val]) => val !== 'cabines' || peutCabines)
+  )
 
   // Conversations cabines
   let convCabines = $state<any[]>([])
@@ -24,35 +29,21 @@
   let envoiGroupe = $state(false)
 
   let zoneMessages = $state<HTMLDivElement | undefined>(undefined)
-  let nomsAdmins = $state<Record<string, string>>({})
   let intervalle: ReturnType<typeof setInterval> | undefined
 
   function estMonId(id: unknown) {
     return id != null && String(id) === String(auth.user?.id ?? '')
   }
 
-  function nomAdmin(id: unknown) {
-    return id != null ? nomsAdmins[String(id)] : undefined
-  }
-
   function nomConversation(conv: any) {
     if (onglet === 'cabines') return conv.cabinName ?? `Conv. #${String(conv.id ?? '').slice(-6)}`
-    const autre = estMonId(conv.user1Id) ? conv.user2Id : conv.user1Id
-    return nomAdmin(autre) ?? `Conv. #${String(conv.id ?? '').slice(-6)}`
+    const autre = conv.otherParticipantName ?? (estMonId(conv.user1Id) ? conv.user2Name : conv.user1Name)
+    return autre ?? `Conv. #${String(conv.id ?? '').slice(-6)}`
   }
 
   function listeDepuis(res: any) {
     const d = res.data?.data
     return Array.isArray(d) ? d : []
-  }
-
-  async function chargerNomsAdmins() {
-    try {
-      const res = await api.get('/admin/team')
-      const noms: Record<string, string> = {}
-      for (const u of listeDepuis(res)) if (u?.id) noms[String(u.id)] = u.fullName ?? u.email
-      nomsAdmins = noms
-    } catch {}
   }
 
   function formaterHeure(d: string | null) {
@@ -126,6 +117,7 @@
     try {
       const res = await api.get(endpointMessages(conv))
       messages = listeDepuis(res)
+      if (onglet === 'cabines') convCabines = convCabines.map(c => c.id === conv.id ? { ...c, unreadCountAdmin: 0 } : c)
       await tick()
       zoneMessages?.scrollTo({ top: zoneMessages.scrollHeight, behavior: 'smooth' })
     } catch { toast.erreur('Erreur', 'Impossible de charger les messages') }
@@ -144,7 +136,7 @@
       await tick()
       zoneMessages?.scrollTo({ top: zoneMessages.scrollHeight, behavior: 'smooth' })
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible d\'envoyer')
+      toast.erreur('Erreur', e.response?.data?.errors?.[0]?.message ?? e.response?.data?.message ?? 'Impossible d\'envoyer')
     } finally { envoi = false }
   }
 
@@ -160,7 +152,7 @@
       await tick()
       zoneMessages?.scrollTo({ top: zoneMessages.scrollHeight, behavior: 'smooth' })
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible d\'envoyer')
+      toast.erreur('Erreur', e.response?.data?.errors?.[0]?.message ?? e.response?.data?.message ?? 'Impossible d\'envoyer')
     } finally { envoiGroupe = false }
   }
 
@@ -171,13 +163,16 @@
   }
 
   $effect(() => {
+    if (onglet === 'cabines' && !peutCabines) {
+      onglet = 'admins'
+      return
+    }
     if (onglet === 'cabines') chargerConvCabines()
     else if (onglet === 'admins') chargerConvAdmins()
     else chargerGroupe()
   })
 
   onMount(() => {
-    chargerNomsAdmins()
     intervalle = setInterval(rafraichirMessages, 20000)
   })
 
@@ -188,12 +183,12 @@
 
 <div class="mb-6">
   <h2 class="font-black text-2xl text-slate-900" style="letter-spacing:-0.02em">Messagerie</h2>
-  <p class="text-sm text-slate-500 mt-0.5">Communication interne et avec les cabines</p>
+  <p class="text-sm text-slate-500 mt-0.5">{peutCabines ? 'Communication interne et avec les cabines' : 'Communication interne'}</p>
 </div>
 
 <!-- Onglets -->
 <div class="flex gap-1 bg-slate-100 rounded-xl p-1 mb-5 w-fit">
-  {#each [['cabines', 'store', 'Cabines'], ['admins', 'admin_panel_settings', 'Admins'], ['groupe', 'groups', 'Groupe']] as [val, icone, label]}
+  {#each onglets as [val, icone, label]}
     <button onclick={() => surChangementOnglet(val as Onglet)}
       class="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold transition-all
         {onglet === val ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}">
@@ -297,7 +292,7 @@
                 <div class="max-w-xs lg:max-w-md px-4 py-2.5 rounded-2xl text-sm
                   {estMoi ? 'bg-orange-500 text-white rounded-br-sm' : 'bg-slate-100 text-slate-800 rounded-bl-sm'}">
                   {#if !estMoi}
-                    <p class="text-xs font-semibold mb-1 {estMoi ? 'text-orange-100' : 'text-orange-600'}">{nomAdmin(msg.senderId) ?? 'Admin'}</p>
+                    <p class="text-xs font-semibold mb-1 {estMoi ? 'text-orange-100' : 'text-orange-600'}">{msg.senderName ?? 'Admin'}</p>
                   {/if}
                   <p>{msg.content}</p>
                   <p class="text-xs mt-1 {estMoi ? 'text-orange-100' : 'text-slate-400'} text-right">{formaterHeure(msg.createdAt)}</p>

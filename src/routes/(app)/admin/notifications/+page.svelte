@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import api from '$lib/api'
   import { toast } from '$lib/stores/toast.svelte'
+  import { auth } from '$lib/stores/auth.svelte'
 
   let notifications = $state<any[]>([])
   let meta = $state<any>(null)
@@ -69,8 +70,10 @@
     }
   }
 
+  const broadcastValide = $derived(broadcast.title.trim().length >= 3 && broadcast.message.trim().length > 0)
+
   async function envoyerBroadcast() {
-    if (!broadcast.title || !broadcast.message) return
+    if (!broadcastValide) return
     envoi = true
     try {
       const res = await api.post('/admin/notifications/broadcast', {
@@ -82,7 +85,7 @@
       afficherModalBroadcast = false
       broadcast = { type: 'info', title: '', message: '' }
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible d\'envoyer')
+      toast.erreur('Erreur', e.response?.data?.errors?.[0]?.message ?? e.response?.data?.message ?? 'Impossible d\'envoyer')
     } finally {
       envoi = false
     }
@@ -106,10 +109,12 @@
         Tout marquer lu
       </button>
     {/if}
-    <button onclick={() => afficherModalBroadcast = true} class="btn-primary">
-      <span class="material-symbols-outlined icon-filled" style="font-size:16px">campaign</span>
-      Diffuser
-    </button>
+    {#if auth.peut('canViewSettings')}
+      <button onclick={() => afficherModalBroadcast = true} class="btn-primary">
+        <span class="material-symbols-outlined icon-filled" style="font-size:16px">campaign</span>
+        Diffuser
+      </button>
+    {/if}
   </div>
 </div>
 
@@ -184,7 +189,7 @@
 </div>
 
 <!-- Modal broadcast -->
-{#if afficherModalBroadcast}
+{#if afficherModalBroadcast && auth.peut('canViewSettings')}
   <div class="fixed inset-0 z-50 grid place-items-center min-h-screen p-4 pointer-events-none">
     <div class="bg-white rounded-2xl w-full max-w-md pointer-events-auto animate-fade-in-up" style="box-shadow: 0 25px 60px rgba(0,0,0,0.18), 0 8px 24px rgba(0,0,0,0.10);">
       <div class="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
@@ -202,13 +207,15 @@
           <select bind:value={broadcast.type} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
             <option value="info">Information</option>
             <option value="warning">Avertissement</option>
-            <option value="order">Commande</option>
-            <option value="payment">Paiement</option>
+            <option value="urgent">Urgent</option>
           </select>
         </div>
         <div>
           <label class="block text-xs font-semibold text-slate-600 mb-1.5">Titre *</label>
-          <input type="text" bind:value={broadcast.title} placeholder="Titre de la notification" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" required />
+          <input type="text" bind:value={broadcast.title} placeholder="Titre de la notification" minlength="3" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" required />
+          {#if broadcast.title.trim().length > 0 && broadcast.title.trim().length < 3}
+            <p class="text-xs text-red-600 mt-1">Le titre doit contenir au moins 3 caractères</p>
+          {/if}
         </div>
         <div>
           <label class="block text-xs font-semibold text-slate-600 mb-1.5">Message *</label>
@@ -216,7 +223,7 @@
         </div>
         <div class="flex gap-3">
           <button onclick={() => afficherModalBroadcast = false} class="btn-secondary flex-1">Annuler</button>
-          <button onclick={envoyerBroadcast} disabled={!broadcast.title.trim() || !broadcast.message.trim() || envoi} class="btn-primary flex-1 justify-center">
+          <button onclick={envoyerBroadcast} disabled={!broadcastValide || envoi} class="btn-primary flex-1 justify-center">
             {#if envoi}
               <span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
             {:else}

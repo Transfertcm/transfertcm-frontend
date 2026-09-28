@@ -27,14 +27,11 @@
   async function chargerDonnees() {
     chargement = true
     try {
-      const [dashRes, ordersRes] = await Promise.all([
-        api.get('/admin/dashboard', { params: { periode } }),
-        api.get('/admin/orders?per_page=8&page=1'),
-      ])
+      const dashRes = await api.get('/admin/dashboard', { params: { periode } })
 
       const dash = dashRes.data?.data ?? dashRes.data
       stats = dash
-      commandesRecentes = ordersRes.data?.data ?? []
+      commandesRecentes = (dash?.recentOrders ?? []).slice(0, 8)
       cabinesActives = dash?.activeCabins ?? []
     } catch {
       stats = null
@@ -50,6 +47,8 @@
     chargerDonnees()
   })
 
+  const peutVoirCommandes = $derived(auth.peut('canViewOrders'))
+  const peutVoirCabines = $derived(auth.peut('canManageCabins'))
   const prenomAdmin = $derived(auth.user?.fullName?.split(' ')[0] ?? 'Admin')
 </script>
 
@@ -76,14 +75,16 @@
         </button>
       {/each}
     </div>
-    <a
-      href="/admin/commandes"
-      class="btn-primary"
-    >
-      <span class="material-symbols-outlined icon-filled" style="font-size: 18px;">receipt_long</span>
-      <span class="hidden sm:inline">{$t('admin.dashboard.manage_orders')}</span>
-      <span class="sm:hidden">{$t('common.orders')}</span>
-    </a>
+    {#if peutVoirCommandes}
+      <a
+        href="/admin/commandes"
+        class="btn-primary"
+      >
+        <span class="material-symbols-outlined icon-filled" style="font-size: 18px;">receipt_long</span>
+        <span class="hidden sm:inline">{$t('admin.dashboard.manage_orders')}</span>
+        <span class="sm:hidden">{$t('common.orders')}</span>
+      </a>
+    {/if}
   </div>
 </div>
 
@@ -104,26 +105,30 @@
     <StatCard
       titre="Commandes {labelPeriode}"
       valeur={ordres?.totals?.total ?? 0}
+      sousTitre="{ordres?.totals?.completed ?? 0} livrée{(ordres?.totals?.completed ?? 0) > 1 ? 's' : ''} et payée{(ordres?.totals?.completed ?? 0) > 1 ? 's' : ''}"
       icone="receipt_long"
       couleur="orange"
     />
     <StatCard
-      titre="Chiffre d'affaires {labelPeriode}"
+      titre="Volume livré {labelPeriode}"
       valeur={formaterMontant(ordres?.totals?.totalAmount ?? 0)}
+      sousTitre="Commandes livrées et payées, hors frais"
       icone="payments"
       couleur="jaune"
     />
     <StatCard
-      titre="Paiements reçus {labelPeriode}"
-      valeur={paiements?.totalPaid ?? 0}
-      icone="check_circle"
-      couleur="vert"
-    />
-    <StatCard
       titre="Montant encaissé {labelPeriode}"
-      valeur={formaterMontant(paiements?.totalRevenue ?? 0)}
+      valeur={formaterMontant(paiements?.totalCollected ?? paiements?.totalRevenue ?? 0)}
+      sousTitre="{paiements?.totalPaid ?? 0} paiement{(paiements?.totalPaid ?? 0) > 1 ? 's' : ''} reçu{(paiements?.totalPaid ?? 0) > 1 ? 's' : ''}, frais compris"
       icone="account_balance"
       couleur="violet"
+    />
+    <StatCard
+      titre="Revenus (frais) {labelPeriode}"
+      valeur={formaterMontant(paiements?.feesCollected ?? 0)}
+      sousTitre="Frais perçus sur les commandes livrées"
+      icone="savings"
+      couleur="vert"
     />
   </div>
 
@@ -158,9 +163,11 @@
   <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-100 overflow-hidden card-shadow">
     <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
       <h3 class="font-bold text-slate-900">{$t('admin.dashboard.recent_orders')}</h3>
-      <a href="/admin/commandes" class="text-sm text-orange-500 hover:text-orange-600 font-semibold">
-        {$t('common.see_all')}
-      </a>
+      {#if peutVoirCommandes}
+        <a href="/admin/commandes" class="text-sm text-orange-500 hover:text-orange-600 font-semibold">
+          {$t('common.see_all')}
+        </a>
+      {/if}
     </div>
 
     {#if chargement}
@@ -188,8 +195,9 @@
       </div>
       <div class="divide-y divide-slate-50">
         {#each commandesRecentes as cmd}
-          <a
-            href="/admin/commandes/{cmd.id}"
+          <svelte:element
+            this={peutVoirCommandes ? 'a' : 'div'}
+            href={peutVoirCommandes ? `/admin/commandes/${cmd.id}` : undefined}
             class="flex flex-col gap-1.5 lg:grid lg:grid-cols-12 lg:gap-3 lg:items-center px-5 py-3 hover:bg-slate-50 transition-all"
           >
             <!-- Client -->
@@ -228,7 +236,7 @@
             <div class="lg:col-span-3 pl-9 lg:pl-0">
               <Badge statut={cmd.status ?? 'pending'} />
             </div>
-          </a>
+          </svelte:element>
         {/each}
       </div>
     {/if}
@@ -238,9 +246,11 @@
   <div class="bg-white rounded-2xl border border-slate-100 overflow-hidden card-shadow">
     <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
       <h3 class="font-bold text-slate-900">{$t('admin.dashboard.active_cabins')}</h3>
-      <a href="/admin/cabines" class="text-sm text-orange-500 hover:text-orange-600 font-semibold">
-        {$t('common.see_all')}
-      </a>
+      {#if peutVoirCabines}
+        <a href="/admin/cabines" class="text-sm text-orange-500 hover:text-orange-600 font-semibold">
+          {$t('common.see_all')}
+        </a>
+      {/if}
     </div>
 
     {#if chargement}
@@ -259,8 +269,9 @@
     {:else}
       <div class="divide-y divide-slate-50">
         {#each cabinesActives as cabine}
-          <a
-            href="/admin/cabines/{cabine.id}"
+          <svelte:element
+            this={peutVoirCabines ? 'a' : 'div'}
+            href={peutVoirCabines ? `/admin/cabines/${cabine.id}` : undefined}
             class="flex items-center gap-3 px-5 py-3.5 hover:bg-slate-50 transition-all"
           >
             <div
@@ -281,7 +292,7 @@
               </p>
               <p class="text-xs text-slate-400">XAF UV</p>
             </div>
-          </a>
+          </svelte:element>
         {/each}
       </div>
     {/if}

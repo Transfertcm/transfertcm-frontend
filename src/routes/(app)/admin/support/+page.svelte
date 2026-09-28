@@ -43,6 +43,7 @@
     try {
       const res = await api.get(`/support/conversations/${conv.id}/messages`)
       messages = Array.isArray(res.data?.data) ? res.data.data : []
+      conversations = conversations.map(c => c.id === conv.id ? { ...c, unreadByAdmin: 0 } : c)
       await tick()
       zoneMessages?.scrollTo({ top: zoneMessages.scrollHeight, behavior: 'smooth' })
     } catch { toast.erreur('Erreur', 'Impossible de charger les messages') }
@@ -66,7 +67,7 @@
       await tick()
       zoneMessages?.scrollTo({ top: zoneMessages.scrollHeight, behavior: 'smooth' })
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? "Impossible d'envoyer")
+      toast.erreur('Erreur', e.response?.data?.errors?.[0]?.message ?? e.response?.data?.message ?? "Impossible d'envoyer")
     } finally { envoi = false }
   }
 
@@ -79,7 +80,7 @@
       convActive = { ...convActive, status: 'resolved' }
       conversations = conversations.map(c => c.id === convActive.id ? { ...c, status: 'resolved' } : c)
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de résoudre')
+      toast.erreur('Erreur', e.response?.data?.errors?.[0]?.message ?? e.response?.data?.message ?? 'Impossible de résoudre')
     } finally { resolutionEnCours = false }
   }
 

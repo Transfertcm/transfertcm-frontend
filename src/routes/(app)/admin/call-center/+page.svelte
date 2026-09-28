@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
   import api from '$lib/api'
   import { auth } from '$lib/stores/auth.svelte'
   import { toast } from '$lib/stores/toast.svelte'
@@ -19,21 +18,10 @@
   let afficherFormAppel = $state(false)
   let formAppel = $state({ phoneNumber: '', status: 'called', notes: '', callDurationSeconds: '' })
   let envoiAppel = $state(false)
-  let nomsAgents = $state<Record<string, string>>({})
 
-  function nomAgent(id: unknown) {
+  function nomAgent(id: unknown, nom: string | null | undefined) {
     if (id == null || id === '') return '—'
-    return nomsAgents[String(id)] ?? 'Agent inconnu'
-  }
-
-  async function chargerAgents() {
-    try {
-      const res = await api.get('/admin/team')
-      const liste = Array.isArray(res.data?.data) ? res.data.data : []
-      const noms: Record<string, string> = {}
-      for (const u of liste) if (u?.id) noms[String(u.id)] = u.fullName ?? u.email
-      nomsAgents = noms
-    } catch {}
+    return nom ?? 'Agent inconnu'
   }
 
   function formaterDate(d: string | null) {
@@ -114,8 +102,6 @@
     else if (onglet === 'historique') { page; chargerLogs() }
     else chargerStats()
   })
-
-  onMount(chargerAgents)
 
   const configStatutUrgent: Record<string, { label: string; classe: string }> = {
     pending: { label: 'En attente', classe: 'bg-red-100 text-red-700 border-red-200' },
@@ -264,7 +250,7 @@
               <p class="text-xs text-slate-500 line-clamp-2">{log.notes ?? '—'}</p>
             </div>
             <div class="lg:col-span-2">
-              <p class="text-xs font-semibold text-slate-700">{nomAgent(log.calledBy)}</p>
+              <p class="text-xs font-semibold text-slate-700">{nomAgent(log.calledBy, log.calledByName)}</p>
               <p class="text-xs text-slate-400">{formaterDate(log.createdAt)}</p>
             </div>
           </div>
@@ -320,9 +306,9 @@
               <div class="flex items-center gap-3">
                 <div class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold"
                   style="background:linear-gradient(135deg, #007A5E 0%, #00A878 100%)">
-                  {nomAgent(agent.calledBy)[0].toUpperCase()}
+                  {nomAgent(agent.calledBy, agent.agentName)[0].toUpperCase()}
                 </div>
-                <p class="text-sm font-semibold text-slate-800">{nomAgent(agent.calledBy)}</p>
+                <p class="text-sm font-semibold text-slate-800">{nomAgent(agent.calledBy, agent.agentName)}</p>
               </div>
               <div class="text-right">
                 <p class="text-sm font-bold text-slate-900">{agent.count} appels</p>

@@ -63,27 +63,23 @@
     if (auth.user?.role !== 'super_admin') return
     try {
       const res = await api.get('/admin/team')
-      admins = (res.data?.data ?? []).filter((a: any) => a.role !== 'cabin')
+      admins = res.data?.data ?? []
     } catch {}
   }
 
   async function chargerSessionActive() {
-    if (!auth.user?.id) return
-    const res = await api.get('/admin/salary/sessions', { params: { admin_id: auth.user.id, per_page: 1 } })
-    const derniere = (res.data?.data ?? [])[0]
-    sessionActive = derniere && ['in_progress', 'paused'].includes(derniere.status) ? derniere : null
+    const res = await api.get('/admin/salary/sessions/active')
+    sessionActive = res.data?.data ?? null
     mettreAJourTimer()
   }
 
   async function charger() {
     chargement = true
     try {
-      const sessionParams: any = { per_page: 20 }
-      if (auth.user?.role !== 'super_admin') sessionParams.admin_id = auth.user?.id
-
+      const params = { per_page: 20 }
       const [sessRes, payRes, cfgRes] = await Promise.all([
-        api.get('/admin/salary/sessions', { params: sessionParams }),
-        api.get('/admin/salary/payments', { params: { ...sessionParams } }),
+        api.get('/admin/salary/sessions', { params }),
+        api.get('/admin/salary/payments', { params }),
         api.get('/admin/salary/config'),
         chargerSessionActive(),
       ])
@@ -214,6 +210,14 @@
   onMount(() => () => { if (intervalTimer) clearInterval(intervalTimer) })
 
   const estSuperAdmin = $derived(auth.user?.role === 'super_admin')
+  const peutGerer = $derived(auth.peut('canViewSalaries'))
+
+  const adminsPaiement = $derived(
+    estSuperAdmin
+      ? admins.map((a: any) => ({ id: a.id, libelle: a.fullName ? `${a.fullName} (${a.email})` : a.email }))
+      : [...new Set([...sessions, ...paiements].map((x: any) => x.adminId).filter(Boolean))]
+          .map((id: string) => ({ id, libelle: nomAdmin(id) }))
+  )
 
   const couleurStatut: Record<string, string> = {
     in_progress: 'bg-emerald-100 text-emerald-700',
@@ -229,7 +233,7 @@
     <h2 class="font-black text-2xl text-slate-900" style="letter-spacing:-0.02em">{$t('admin.salary.title')}</h2>
     <p class="text-sm text-slate-500 mt-0.5">{$t('admin.salary.subtitle')}</p>
   </div>
-  {#if estSuperAdmin}
+  {#if peutGerer}
     <div class="flex gap-2">
       <button onclick={() => afficherModalConfig = true} class="btn-secondary">
         <span class="material-symbols-outlined icon-filled" style="font-size:16px">settings</span>
@@ -403,10 +407,13 @@
           <label for="pay-admin" class="block text-xs font-semibold text-slate-600 mb-1.5">{$t('admin.salary.col_admin')} *</label>
           <select id="pay-admin" bind:value={formPaiement.adminId} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" required>
             <option value="">—</option>
-            {#each admins as a}
-              <option value={a.id}>{a.fullName || a.email}{a.fullName ? ` (${a.email})` : ''}</option>
+            {#each adminsPaiement as a}
+              <option value={a.id}>{a.libelle}</option>
             {/each}
           </select>
+          {#if !estSuperAdmin}
+            <p class="text-xs text-slate-400 mt-1">Seuls les admins ayant des sessions ou paiements récents sont proposés : la liste complète de l'équipe est réservée au super administrateur.</p>
+          {/if}
         </div>
         <div class="grid grid-cols-2 gap-4">
           <div>

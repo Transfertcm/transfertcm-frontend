@@ -4,6 +4,7 @@
   import { goto } from '$app/navigation'
   import api from '$lib/api'
   import { toast } from '$lib/stores/toast.svelte'
+  import { auth } from '$lib/stores/auth.svelte'
   import Badge, { libelleStatut, libelleService } from '$lib/components/ui/Badge.svelte'
   import { t, translate } from '$lib/stores/locale'
   import { formatOrderCode } from '$lib/reference'
@@ -22,6 +23,9 @@
   let page = $state(1)
   let perPage = 20
 
+  const peutAssigner = $derived(auth.peut('canAssignOrders'))
+  const peutValiderPaiement = $derived(auth.peut('canValidatePayments'))
+
   // ── Modal assignation ──────────────────────────────────────────────────────
   let modalAssign        = $state(false)
   let assignOrderId      = $state<string | null>(null)
@@ -32,6 +36,7 @@
   let chargementCabines  = $state(false)
 
   async function ouvrirAssign(cmd: any) {
+    if (!peutAssigner) return
     assignOrderId   = cmd.id
     assignOrderCode = cmd.orderCode ?? cmd.order_code ?? cmd.id
     cabineChoisie   = ''
@@ -106,31 +111,6 @@
     { val: 'transfer', label: 'Transfert' },
   ]
 
-  const libellesChamps: Record<string, string> = {
-    customerPhone: 'Téléphone client',
-    recipientPhone: 'Téléphone destinataire',
-    serviceType: 'Service',
-    network: 'Réseau',
-    amount: 'Montant',
-    packageName: 'Forfait',
-    paymentMethod: 'Méthode de paiement',
-    expectedPayerPhone: 'Téléphone payeur attendu',
-  }
-
-  function messageValidation(err: any) {
-    const meta = err.meta ?? {}
-    switch (err.rule) {
-      case 'required': return 'Champ obligatoire'
-      case 'minLength': return `Au moins ${meta.min} caractères`
-      case 'maxLength': return `Au plus ${meta.max} caractères`
-      case 'regex': return 'Numéro camerounais invalide (ex. 6XXXXXXXX)'
-      case 'enum': return 'Valeur non acceptée'
-      case 'number': return 'Nombre attendu'
-      case 'min': return `Minimum ${meta.min}`
-      case 'max': return `Maximum ${meta.max}`
-      default: return err.message ?? 'Valeur invalide'
-    }
-  }
   let creationEnCours = $state(false)
 
   const statuts = $derived([
@@ -141,10 +121,6 @@
       'cancelled', 'rejected', 'payment_failed', 'payment_timeout', 'expired', 'refunded',
     ].map((val) => ({ val, label: libelleStatut(val, $t) })),
   ])
-
-  function normaliserTelephone(valeur: string) {
-    return valeur.replace(/[\s.-]/g, '').replace(/^\+?237(?=\d{9}$)/, '')
-  }
 
   function formaterMontant(n: any) {
     const num = Number(n)
@@ -167,8 +143,8 @@
       if (filtreReseau) params.network = filtreReseau
       if (filtreService) params.service_type = filtreService
       if (filtreCabine) params.cabin_id = filtreCabine
-      const telephone = normaliserTelephone(recherche.trim())
-      if (telephone) params.customer_phone = telephone
+      const terme = recherche.trim()
+      if (terme) params.search = terme
 
       const res = await api.get('/admin/orders', { params })
       commandes = res.data?.data ?? []
@@ -269,9 +245,9 @@
       if (e.response?.status === 422 && Array.isArray(liste)) {
         const autres: string[] = []
         liste.forEach((err: any) => {
-          const message = messageValidation(err)
+          const message = err.message ?? translate('common.error_save')
           if (err.field === 'customerPhone' || err.field === 'recipientPhone') erreurs[err.field] = message
-          else autres.push(`${libellesChamps[err.field] ?? err.field} : ${message}`)
+          else autres.push(message)
         })
         erreurGenerale = autres.join(' · ')
       } else {
@@ -302,7 +278,7 @@
   $effect(() => {
     const id = filtreCabine
     nomCabineFiltre = ''
-    if (!id) return
+    if (!id || !auth.peut('canManageCabins')) return
     api.get(`/cabins/${id}`)
       .then((res) => { if (filtreCabine === id) nomCabineFiltre = res.data?.data?.name ?? '' })
       .catch(() => {})
@@ -334,8 +310,8 @@
       <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" style="font-size:16px">search</span>
       <input
         type="text"
-        placeholder="N° client exact (6XXXXXXXX)"
-        title="Le filtre porte sur le numéro exact du client"
+        placeholder="Code commande, n° client ou bénéficiaire"
+        title="Recherche sur une partie du code commande ou d'un numéro client/bénéficiaire"
         bind:value={recherche}
         oninput={surRecherche}
         class="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm"
@@ -445,7 +421,7 @@
             <a href="/admin/commandes/{cmd.id}" class="w-7 h-7 rounded-lg hover:bg-orange-50 flex items-center justify-center text-slate-400 hover:text-orange-500" title={$t('common.view')}>
               <span class="material-symbols-outlined" style="font-size:16px">open_in_new</span>
             </a>
-            {#if ['pending_admin_review', 'admin_approved', 'returned_to_admin'].includes(cmd.status)}
+            {#if peutAssigner && ['pending_admin_review', 'admin_approved', 'returned_to_admin'].includes(cmd.status)}
               <button
                 onclick={() => ouvrirAssign(cmd)}
                 disabled={!!chargementAction}
@@ -470,7 +446,7 @@
                 {/if}
               </button>
             {/if}
-            {#if cmd.status === 'awaiting_payment'}
+            {#if peutValiderPaiement && cmd.status === 'awaiting_payment'}
               <button
                 onclick={() => validerPaiement(cmd.id)}
                 disabled={!!chargementAction}

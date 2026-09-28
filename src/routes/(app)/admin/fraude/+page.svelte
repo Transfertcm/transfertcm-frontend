@@ -48,9 +48,8 @@
         api.get('/admin/fraud/blacklist', { params: { page: pageBl, per_page: 20 } }),
         api.get('/admin/fraud/stats'),
       ])
-      const d = blRes.data?.data
-      blacklist = Array.isArray(d?.data) ? d.data : []
-      metaBl = d?.meta ?? null
+      blacklist = Array.isArray(blRes.data?.data) ? blRes.data.data : []
+      metaBl = blRes.data?.meta ?? null
       stats = statsRes.data?.data ?? null
     } catch { toast.erreur(translate('toast.error'), translate('common.error_load')) }
     finally { chargement = false }
@@ -77,7 +76,7 @@
       formBl = { phone: '', reason: '', expiresInDays: '' }
       await charger()
     } catch (e: any) {
-      toast.erreur(translate('toast.error'), e.response?.data?.message ?? translate('common.error_save'))
+      toast.erreur(translate('toast.error'), e.response?.data?.errors?.[0]?.message ?? e.response?.data?.message ?? translate('common.error_save'))
     } finally { actionEnCours = '' }
   }
 
@@ -88,7 +87,7 @@
       toast.succes(translate('admin.fraud.unblocked'))
       await charger()
     } catch (e: any) {
-      toast.erreur(translate('toast.error'), e.response?.data?.message ?? translate('common.error_save'))
+      toast.erreur(translate('toast.error'), e.response?.data?.errors?.[0]?.message ?? e.response?.data?.message ?? translate('common.error_save'))
     } finally { actionEnCours = '' }
   }
 
@@ -104,7 +103,7 @@
       const res = await api.post('/admin/fraud/check-phone', { phone: phoneAVerifier.replace(/\s/g, '') })
       resultVerif = res.data?.data ?? null
     } catch (e: any) {
-      toast.erreur(translate('toast.error'), e.response?.data?.message ?? translate('common.error_save'))
+      toast.erreur(translate('toast.error'), e.response?.data?.errors?.[0]?.message ?? e.response?.data?.message ?? translate('common.error_save'))
     } finally { verificationEnCours = false }
   }
 
@@ -129,7 +128,7 @@
   <div class="grid grid-cols-1 sm:grid-cols-3 stagger gap-3 mb-5">
     <StatCard titre={$t('admin.fraud.stat.blocked')} valeur={stats.blacklistedPhones ?? 0} icone="block" couleur="rouge" />
     <StatCard titre="Commandes bloquées pour fraude (ce mois)" valeur={stats.highRiskOrders ?? 0} icone="security" couleur="orange" />
-    <StatCard titre="Commandes rejetées ou annulées (ce mois)" valeur={stats.blockedOrders ?? 0} icone="warning" couleur="jaune" />
+    <StatCard titre="Commandes rejetées ou annulées (ce mois)" valeur={stats.rejectedOrCancelledOrders ?? 0} icone="warning" couleur="jaune" />
   </div>
 {/if}
 
@@ -252,7 +251,7 @@
               <div>
                 <p class="text-xs text-slate-500 mb-0.5">{$t('admin.fraud.recommendation')}</p>
                 <p class="font-semibold text-slate-800">
-                  {resultVerif.blacklisted ? 'Bloquer (numéro en liste noire)' : (libellesRecommandation[resultVerif.recommendation] ?? '—')}
+                  {libellesRecommandation[resultVerif.recommendation] ?? '—'}
                 </p>
               </div>
             </div>

@@ -6,6 +6,7 @@
   import { toast } from '$lib/stores/toast.svelte'
   import Badge from '$lib/components/ui/Badge.svelte'
   import { t, translate } from '$lib/stores/locale'
+  import { auth } from '$lib/stores/auth.svelte'
 
   type Onglet = 'abonnements' | 'factures' | 'demandes'
 
@@ -23,6 +24,18 @@
     cancelled:  { label: 'Annulée',    classe: 'bg-slate-100 text-slate-600 border-slate-200' },
     paid:       { label: 'Payée',      classe: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
     overdue:    { label: 'En retard',  classe: 'bg-red-100 text-red-700 border-red-200' },
+  }
+
+  const transitionsFacture: Record<string, string[]> = {
+    pending: ['paid', 'overdue', 'cancelled'],
+    overdue: ['paid', 'cancelled'],
+  }
+
+  const methodesPaiement: Record<string, string> = {
+    cash: 'form.method.cash',
+    mtn_money: 'form.method.mtn_money',
+    orange_money: 'form.method.orange_money',
+    virement: 'form.method.bank_transfer',
   }
 
   const urgences: Record<string, string> = {
@@ -43,7 +56,7 @@
   let cabineFiltreInfo = $state<any>(null)
 
   let cabines = $state<any[]>([])
-  const nomsCabines = $derived(Object.fromEntries(cabines.map((c) => [c.id, c.name])))
+  const peutVoirCabines = $derived(auth.peut('canManageCabins'))
 
   // Abonnements
   let abonnements = $state<any[]>([])
@@ -72,6 +85,8 @@
   let cabineSelectionnee = $state<any>(null)
   let demandeSelectionnee = $state<any>(null)
   let afficherModalDemande = $state(false)
+  let factureSelectionnee = $state<any>(null)
+  let formStatutFacture = $state({ status: '', paymentMethod: '', paymentReference: '' })
 
   // Formulaires
   let formRenouveler = $state({ cabinId: '', subscriptionType: 'basic', amountPaid: '', paymentMethod: 'cash', months: 1 })
@@ -111,6 +126,11 @@
 
   async function chargerCabineFiltre() {
     if (!cabineFiltre) { cabineFiltreInfo = null; return }
+    if (!peutVoirCabines) {
+      if (!cabines.length) await chargerCabines()
+      cabineFiltreInfo = cabines.find((c) => c.id === cabineFiltre) ?? null
+      return
+    }
     try {
       const res = await api.get(`/cabins/${cabineFiltre}`)
       cabineFiltreInfo = res.data?.data ?? null
@@ -205,6 +225,29 @@
     } finally { actionEnCours = '' }
   }
 
+  function ouvrirStatutFacture(fact: any) {
+    factureSelectionnee = fact
+    formStatutFacture = { status: transitionsFacture[fact.status]?.[0] ?? '', paymentMethod: '', paymentReference: '' }
+  }
+
+  async function changerStatutFacture() {
+    if (!factureSelectionnee || !formStatutFacture.status) return
+    actionEnCours = 'statut-facture'
+    try {
+      const payload: any = { status: formStatutFacture.status }
+      if (formStatutFacture.status === 'paid') {
+        if (formStatutFacture.paymentMethod) payload.paymentMethod = formStatutFacture.paymentMethod
+        if (formStatutFacture.paymentReference.trim()) payload.paymentReference = formStatutFacture.paymentReference.trim()
+      }
+      await api.patch(`/admin/subscriptions/invoices/${factureSelectionnee.id}/status`, payload)
+      toast.succes('Facture mise à jour')
+      factureSelectionnee = null
+      await chargerFactures()
+    } catch (e: any) {
+      toast.erreur(translate('toast.error'), messageErreur(e, 'Impossible de mettre à jour la facture'))
+    } finally { actionEnCours = '' }
+  }
+
   async function approuverDemande(id: string) {
     actionEnCours = id
     try {
@@ -273,7 +316,7 @@
 {#if cabineFiltre}
   <div class="mb-4 flex items-center justify-between gap-3 flex-wrap p-3 rounded-xl bg-orange-50 border border-orange-100">
     <p class="text-sm text-orange-700">
-      Cabine : <span class="font-bold">{cabineFiltreInfo?.name ?? nomsCabines[cabineFiltre] ?? '…'}</span>
+      Cabine : <span class="font-bold">{cabineFiltreInfo?.name ?? '…'}</span>
       <span class="text-xs text-orange-600">(abonnement et factures de cette cabine uniquement)</span>
     </p>
     <button type="button" onclick={retirerFiltreCabine} class="text-xs font-semibold text-orange-600 hover:text-orange-700">Afficher toutes les cabines</button>
@@ -304,6 +347,7 @@
       <select bind:value={filtreStatutAbo} onchange={() => { pageAbo = 1; chargerAbonnements() }} class="px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
         <option value="">{$t('filters.all_statuses')}</option>
         <option value="active">{$t('filters.active')}</option>
+        <option value="expired">Expirés</option>
         <option value="inactive">Inactifs</option>
       </select>
       <label class="flex items-center gap-2 cursor-pointer">
@@ -336,7 +380,11 @@
           {@const jours = joursRestants(abo.subscriptionExpiry)}
           <div class="flex flex-col gap-2 lg:grid lg:grid-cols-12 lg:gap-3 lg:items-center px-5 py-3.5 hover:bg-slate-50 transition-all">
             <div class="lg:col-span-4">
-              <a href="/admin/cabines/{abo.id}" class="text-sm font-semibold text-slate-800 hover:text-orange-600">{abo.name ?? '—'}</a>
+              {#if peutVoirCabines}
+                <a href="/admin/cabines/{abo.id}" class="text-sm font-semibold text-slate-800 hover:text-orange-600">{abo.name ?? '—'}</a>
+              {:else}
+                <p class="text-sm font-semibold text-slate-800">{abo.name ?? '—'}</p>
+              {/if}
             </div>
             <div class="lg:col-span-2">
               <Badge statut={abo.subscriptionStatus ?? 'inactive'} />
@@ -389,7 +437,8 @@
         <div class="col-span-3">{$t('table.cabin')}</div>
         <div class="col-span-2">{$t('table.amount')}</div>
         <div class="col-span-2">{$t('table.status')}</div>
-        <div class="col-span-3">{$t('table.due_date')}</div>
+        <div class="col-span-2">{$t('table.due_date')}</div>
+        <div class="col-span-1">{$t('table.actions')}</div>
       </div>
       <div class="divide-y divide-slate-50">
         {#each factures as fact}
@@ -399,7 +448,7 @@
               <p class="text-xs font-mono font-semibold text-orange-600">{fact.invoiceNumber ?? '—'}</p>
             </div>
             <div class="lg:col-span-3">
-              <p class="text-sm text-slate-700">{nomsCabines[fact.cabinId] ?? '—'}</p>
+              <p class="text-sm text-slate-700">{fact.cabinName ?? '—'}</p>
               <p class="text-xs text-slate-400">{libellePlan(fact.subscriptionType)} · {formaterDate(fact.billingPeriodStart)} → {formaterDate(fact.billingPeriodEnd)}</p>
             </div>
             <div class="lg:col-span-2">
@@ -408,8 +457,16 @@
             <div class="lg:col-span-2">
               <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border {st.classe}">{st.label}</span>
             </div>
-            <div class="lg:col-span-3">
+            <div class="lg:col-span-2">
               <p class="text-sm text-slate-600">{formaterDate(fact.dueDate)}</p>
+            </div>
+            <div class="lg:col-span-1">
+              {#if transitionsFacture[fact.status]}
+                <button onclick={() => ouvrirStatutFacture(fact)} title="Changer le statut"
+                  class="text-xs px-2.5 py-1.5 rounded-lg bg-slate-100 text-slate-600 font-semibold hover:bg-slate-200">
+                  Statut
+                </button>
+              {/if}
             </div>
           </div>
         {/each}
@@ -454,7 +511,7 @@
           {@const st = statutsDocument[dem.status] ?? { label: dem.status ?? '—', classe: 'bg-slate-100 text-slate-600 border-slate-200' }}
           <div class="flex flex-col gap-2 lg:flex-row lg:items-center px-5 py-4 hover:bg-slate-50 transition-all">
             <div class="flex-1 min-w-0">
-              <p class="text-sm font-semibold text-slate-800">{dem.cabinName ?? nomsCabines[dem.cabinId] ?? '—'}</p>
+              <p class="text-sm font-semibold text-slate-800">{dem.cabinName ?? '—'}</p>
               <p class="text-xs text-slate-500 mt-0.5">
                 {libellePlan(dem.currentPlan)} → <span class="font-semibold text-orange-600">{libellePlan(dem.requestedPlan)}</span>
                 {#if dem.urgencyLevel}· Urgence : {urgences[dem.urgencyLevel] ?? dem.urgencyLevel}{/if}
@@ -622,7 +679,7 @@
       </div>
       <div class="p-6 space-y-4">
         <div class="p-3 rounded-xl bg-slate-50 border border-slate-100">
-          <p class="text-sm font-semibold text-slate-800">{demandeSelectionnee.cabinName ?? nomsCabines[demandeSelectionnee.cabinId] ?? '—'}</p>
+          <p class="text-sm font-semibold text-slate-800">{demandeSelectionnee.cabinName ?? '—'}</p>
           <p class="text-xs text-slate-500 mt-1">
             {libellePlan(demandeSelectionnee.currentPlan)} → <span class="font-bold text-orange-600">{libellePlan(demandeSelectionnee.requestedPlan)}</span>
           </p>
@@ -648,6 +705,60 @@
             class="btn-primary flex-1 justify-center">
             {#if actionEnCours === demandeSelectionnee.id}<span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>{:else}
               <span class="material-symbols-outlined icon-filled" style="font-size:16px">check</span>{$t('button.approve')}
+            {/if}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if factureSelectionnee}
+  {@const actuel = statutsDocument[factureSelectionnee.status] ?? { label: factureSelectionnee.status, classe: 'bg-slate-100 text-slate-600 border-slate-200' }}
+  <div class="fixed inset-0 z-50 grid place-items-center min-h-screen p-4 pointer-events-none">
+    <div class="bg-white rounded-2xl w-full max-w-md pointer-events-auto animate-fade-in-up max-h-[90vh] overflow-y-auto" style="box-shadow: 0 25px 60px rgba(0,0,0,0.18), 0 8px 24px rgba(0,0,0,0.10);">
+      <div class="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
+        <h3 class="font-bold text-slate-900">Statut de la facture</h3>
+        <button onclick={() => factureSelectionnee = null} class="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400">
+          <span class="material-symbols-outlined" style="font-size:18px">close</span>
+        </button>
+      </div>
+      <div class="p-6 space-y-4">
+        <div class="p-3 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-between gap-3">
+          <div>
+            <p class="text-xs font-mono font-semibold text-orange-600">{factureSelectionnee.invoiceNumber ?? '—'}</p>
+            <p class="text-sm font-semibold text-slate-800">{factureSelectionnee.cabinName ?? '—'} · {formaterMontant(factureSelectionnee.amount)}</p>
+          </div>
+          <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border {actuel.classe}">{actuel.label}</span>
+        </div>
+        <div>
+          <label for="facture-statut" class="block text-xs font-semibold text-slate-600 mb-1.5">Nouveau statut</label>
+          <select id="facture-statut" bind:value={formStatutFacture.status} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
+            {#each transitionsFacture[factureSelectionnee.status] ?? [] as st}
+              <option value={st}>{statutsDocument[st]?.label ?? st}</option>
+            {/each}
+          </select>
+        </div>
+        {#if formStatutFacture.status === 'paid'}
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label for="facture-methode" class="block text-xs font-semibold text-slate-600 mb-1.5">{$t('form.payment_method')} (facultatif)</label>
+              <select id="facture-methode" bind:value={formStatutFacture.paymentMethod} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
+                <option value="">—</option>
+                {#each Object.entries(methodesPaiement) as [val, cle]}<option value={val}>{$t(cle)}</option>{/each}
+              </select>
+            </div>
+            <div>
+              <label for="facture-reference" class="block text-xs font-semibold text-slate-600 mb-1.5">Référence (facultatif)</label>
+              <input id="facture-reference" type="text" bind:value={formStatutFacture.paymentReference} maxlength="100" placeholder="Ex : MP2609…" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
+            </div>
+          </div>
+        {/if}
+        <div class="flex gap-3">
+          <button onclick={() => factureSelectionnee = null} class="btn-secondary flex-1">{$t('button.cancel')}</button>
+          <button onclick={changerStatutFacture} disabled={!formStatutFacture.status || actionEnCours === 'statut-facture'} class="btn-primary flex-1 justify-center">
+            {#if actionEnCours === 'statut-facture'}<span class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>{:else}
+              <span class="material-symbols-outlined icon-filled" style="font-size:16px">check</span>Enregistrer
             {/if}
           </button>
         </div>

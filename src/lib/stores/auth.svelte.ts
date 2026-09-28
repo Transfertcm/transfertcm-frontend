@@ -1,3 +1,5 @@
+import type { Acces, Permission, Permissions } from '$lib/permissions'
+
 export type AdminRole =
   | 'super_admin'
   | 'admin'
@@ -17,6 +19,7 @@ export interface AuthUser {
 class AuthStore {
   user = $state<AuthUser | null>(null)
   token = $state<string | null>(null)
+  permissions = $state<Permissions | null>(null)
   loading = $state(false)
 
   init() {
@@ -27,6 +30,7 @@ class AuthStore {
         const parsed = JSON.parse(stored)
         this.user = parsed.user
         this.token = parsed.token
+        this.permissions = parsed.permissions ?? null
       } catch {}
     }
   }
@@ -34,14 +38,14 @@ class AuthStore {
   login(u: AuthUser, t: string) {
     this.user = u
     this.token = t
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('tcm_admin_auth', JSON.stringify({ user: u, token: t }))
-    }
+    this.permissions = null
+    this.sauvegarder()
   }
 
   logout() {
     this.user = null
     this.token = null
+    this.permissions = null
     if (typeof localStorage !== 'undefined') {
       localStorage.removeItem('tcm_admin_auth')
     }
@@ -50,9 +54,28 @@ class AuthStore {
   update(partial: Partial<AuthUser>) {
     if (!this.user) return
     this.user = { ...this.user, ...partial }
-    if (typeof localStorage !== 'undefined' && this.token) {
-      localStorage.setItem('tcm_admin_auth', JSON.stringify({ user: this.user, token: this.token }))
-    }
+    this.sauvegarder()
+  }
+
+  definirPermissions(p: Permissions) {
+    this.permissions = p
+    this.sauvegarder()
+  }
+
+  peut(p: Permission) {
+    if (this.user?.role === 'super_admin') return true
+    return this.permissions?.[p] === true
+  }
+
+  aAcces(acces: Acces) {
+    if (acces === null) return true
+    if (acces === 'super_admin') return this.user?.role === 'super_admin'
+    return this.peut(acces)
+  }
+
+  private sauvegarder() {
+    if (typeof localStorage === 'undefined' || !this.token) return
+    localStorage.setItem('tcm_admin_auth', JSON.stringify({ user: this.user, token: this.token, permissions: this.permissions }))
   }
 
   getToken() { return this.token }

@@ -1,13 +1,14 @@
 <script lang="ts">
   import { page } from '$app/stores'
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
   import { derived } from 'svelte/store'
   import { goto } from '$app/navigation'
   import { auth } from '$lib/stores/auth.svelte'
   import { t } from '$lib/stores/locale'
   import api from '$lib/api'
   import LanguageSwitcher from '$lib/components/ui/LanguageSwitcher.svelte'
-  import { libelleStatut } from '$lib/components/ui/Badge.svelte'
+  import { libelleStatut, configStatuts } from '$lib/components/ui/Badge.svelte'
+  import type { Permission } from '$lib/permissions'
 
   let { surToggleSidebar } = $props<{ surToggleSidebar: () => void }>()
 
@@ -42,11 +43,15 @@
   const TYPE_BG: Record<string, string>      = { order: 'bg-orange-50', cabin: 'bg-amber-50', complaint: 'bg-red-50', promo_agent: 'bg-violet-50' }
   const TYPE_TEXT: Record<string, string>    = { order: 'text-orange-500', cabin: 'text-amber-500', complaint: 'text-red-500', promo_agent: 'text-violet-500' }
   const TYPE_LABEL: Record<string, string>   = { order: 'Commande', cabin: 'Cabine', complaint: 'Réclamation', promo_agent: 'Agent promo' }
-  const STATUS_COLORS: Record<string, string> = {
-    pending: 'bg-amber-100 text-amber-700', processing: 'bg-blue-100 text-blue-700',
-    completed: 'bg-emerald-100 text-emerald-700', cancelled: 'bg-slate-100 text-slate-600',
-    active: 'bg-emerald-100 text-emerald-700', suspended: 'bg-red-100 text-red-700',
-    open: 'bg-orange-100 text-orange-700', resolved: 'bg-emerald-100 text-emerald-700',
+  const PERMISSIONS_CABINES_EN_LIGNE: Permission[] = [
+    'canManageCabins', 'canAssignOrders', 'canAccessUv', 'canManageSubscriptions', 'canAccessComplaints', 'canMessageCabins',
+  ]
+  const peutVoirCabinesEnLigne = $derived(PERMISSIONS_CABINES_EN_LIGNE.some((p) => auth.peut(p)))
+  const peutVoirCommandes = $derived(auth.peut('canViewOrders'))
+  const peutGererCabines = $derived(auth.peut('canManageCabins'))
+
+  function classeStatut(statut: string) {
+    return configStatuts[statut]?.classe ?? 'bg-slate-100 text-slate-600 border-slate-200'
   }
   const TYPE_URL_LISTE: Record<string, string> = { complaint: '/admin/reclamations', promo_agent: '/admin/agents-promo' }
   const CODES_SOUS_TITRE: Record<string, string> = {
@@ -65,7 +70,8 @@
       .map((morceau: string) => {
         const code = morceau.trim()
         if (CODES_SOUS_TITRE[code]) return CODES_SOUS_TITRE[code]
-        if (/^[a-z]+(_[a-z]+)*$/.test(code) && code !== 'mtn' && code !== 'orange') return libelleStatut(code, $t)
+        if (code === 'mtn' || code === 'orange') return code.toUpperCase()
+        if (/^[a-z]+(_[a-z]+)*$/.test(code)) return libelleStatut(code, $t)
         return morceau
       })
       .join(' · ')
@@ -105,6 +111,7 @@
       ['/admin/parametres',      'admin.nav.settings'],
       ['/admin/profil',          'admin.nav.profile'],
       ['/admin/packages',        'Forfaits'],
+      ['/admin/finance',         'Réconciliation'],
     ]
     for (const [prefix, cle] of carte) {
       if (chemin === prefix || chemin.startsWith(prefix + '/')) return cle
@@ -115,7 +122,15 @@
   onMount(() => {
     modeSombre = document.documentElement.classList.contains('dark')
     chargerNotifications()
-    chargerCabinesEnLigne()
+  })
+
+  $effect(() => {
+    if (!peutVoirCabinesEnLigne) {
+      cabinesEnLigne = []
+      commandesEnAttente = 0
+      return
+    }
+    untrack(() => chargerCabinesEnLigne())
     // Rafraîchir toutes les 30s pour rester synchronisé avec le scheduler
     cabinesRefreshTimer = setInterval(chargerCabinesEnLigne, 30_000)
     return () => { if (cabinesRefreshTimer) clearInterval(cabinesRefreshTimer) }
@@ -301,7 +316,7 @@
                     <p class="text-xs text-slate-400 truncate">{sousTitre(r)}</p>
                   </div>
                   {#if r.status}
-                    <span class="text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 {STATUS_COLORS[r.status] ?? 'bg-slate-100 text-slate-600'}">
+                    <span class="text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 {classeStatut(r.status)}">
                       {libelleStatut(r.status, $t)}
                     </span>
                   {/if}
@@ -347,6 +362,7 @@
     </button>
 
     <!-- Cabines connectées -->
+    {#if peutVoirCabinesEnLigne}
     <div class="relative">
       <button
         onclick={() => { afficherCabines = !afficherCabines; afficherNotifs = false; if (afficherCabines) chargerCabinesEnLigne() }}
@@ -417,9 +433,11 @@
             {:else}
               {#each cabinesEnLigne as cabin}
                 {@const slotPct = Math.round((cabin.dailyOrdersCount / Math.max(1, cabin.maxDailyOrders)) * 100)}
-                <a
-                  href="/admin/commandes?cabin={cabin.id}"
+                <svelte:element
+                  this={peutVoirCommandes ? 'a' : 'div'}
+                  href={peutVoirCommandes ? `/admin/commandes?cabin=${cabin.id}` : undefined}
                   onclick={() => afficherCabines = false}
+                  role={peutVoirCommandes ? undefined : 'presentation'}
                   class="flex items-center gap-3 px-4 py-3 hover:bg-slate-50 transition-colors group"
                 >
                   <!-- Avatar cabine -->
@@ -466,21 +484,25 @@
                       Libre
                     </span>
                   {/if}
-                </a>
+                </svelte:element>
               {/each}
             {/if}
           </div>
 
           <!-- Footer -->
           <div class="px-4 py-2.5 border-t border-slate-100 flex items-center justify-between">
-            <a
-              href="/admin/cabines"
-              onclick={() => afficherCabines = false}
-              class="text-xs text-slate-500 hover:text-slate-700 font-medium"
-            >
-              Toutes les cabines
-            </a>
-            {#if commandesEnAttente > 0}
+            {#if peutGererCabines}
+              <a
+                href="/admin/cabines"
+                onclick={() => afficherCabines = false}
+                class="text-xs text-slate-500 hover:text-slate-700 font-medium"
+              >
+                Toutes les cabines
+              </a>
+            {:else}
+              <span></span>
+            {/if}
+            {#if commandesEnAttente > 0 && peutVoirCommandes}
               <a
                 href="/admin/commandes?status=pending_admin_review"
                 onclick={() => afficherCabines = false}
@@ -494,6 +516,7 @@
         </div>
       {/if}
     </div>
+    {/if}
 
     <!-- Notifications -->
     <div class="relative">

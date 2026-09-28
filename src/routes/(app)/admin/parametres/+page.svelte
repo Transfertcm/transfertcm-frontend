@@ -24,6 +24,8 @@
   let admins = $state<any[]>([])
   let phoneASupprimer = $state<any>(null)
   let confirmationPhone = $state(false)
+  let villeASupprimer = $state<any>(null)
+  let confirmationVille = $state(false)
 
   // Edition paramètre général
   let settingEnEdition = $state<any>(null)
@@ -69,8 +71,14 @@
     if (!estSuperAdmin) return
     try {
       const res = await api.get('/admin/team')
-      admins = (res.data?.data ?? []).filter((a: any) => a.role !== 'cabin')
+      admins = res.data?.data ?? []
     } catch {}
+  }
+
+  function messageErreur(e: any, defaut: string) {
+    const champs = e.response?.data?.errors
+    if (Array.isArray(champs) && champs.length) return champs.map((x: any) => x.message).join(' ')
+    return e.response?.data?.message ?? defaut
   }
 
   function nomAdmin(id: string | null) {
@@ -87,19 +95,14 @@
   }
 
   async function sauvegarderFrais() {
-    const valeur = Number(fraisEdit)
-    if (!Number.isInteger(valeur) || valeur < 0) {
-      toast.erreur('Valeur invalide', 'Le frais doit être un nombre entier de XAF, positif ou nul.')
-      return
-    }
     actionEnCours = 'frais'
     try {
-      await api.put('/admin/settings/transaction_fees', { value: String(valeur) })
-      toast.succes('Frais mis à jour', 'Pris en compte par le serveur sous 5 minutes maximum.')
+      await api.put('/admin/settings/transaction_fees', { value: String(fraisEdit ?? '').trim() })
+      toast.succes('Frais mis à jour', 'Le nouveau montant s\'applique immédiatement aux nouvelles commandes.')
       fraisEnEdition = false
       await charger()
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de sauvegarder')
+      if (!e.toastAffiche) toast.erreur(e.response?.status === 422 ? 'Valeur invalide' : 'Erreur', messageErreur(e, 'Impossible de sauvegarder'))
     } finally { actionEnCours = '' }
   }
 
@@ -111,7 +114,7 @@
       settingEnEdition = null
       await charger()
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de sauvegarder')
+      if (!e.toastAffiche) toast.erreur(e.response?.status === 422 ? 'Valeur invalide' : 'Erreur', messageErreur(e, 'Impossible de sauvegarder'))
     } finally { actionEnCours = '' }
   }
 
@@ -124,8 +127,7 @@
       formPhone = { phoneNumber: '', phoneLabel: '', isPrimary: false }
       await charger()
     } catch (e: any) {
-      if (e.response?.status === 422) toast.erreur('Numéro invalide', 'Format attendu : 6XXXXXXXX (préfixe 237 facultatif).')
-      else toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible d\'ajouter')
+      if (!e.toastAffiche) toast.erreur(e.response?.status === 422 ? 'Numéro invalide' : 'Erreur', messageErreur(e, 'Impossible d\'ajouter'))
     } finally { actionEnCours = '' }
   }
 
@@ -156,7 +158,25 @@
       formVille = { city: '', adminUserId: '' }
       await charger()
     } catch (e: any) {
-      toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible d\'assigner')
+      if (!e.toastAffiche) toast.erreur('Erreur', messageErreur(e, 'Impossible d\'assigner'))
+    } finally { actionEnCours = '' }
+  }
+
+  function demanderSuppressionVille(assign: any) {
+    villeASupprimer = assign
+    confirmationVille = true
+  }
+
+  async function supprimerVille(id: string) {
+    actionEnCours = id
+    try {
+      const res = await api.delete(`/admin/settings/city-assignments/${id}`)
+      toast.succes('Assignation supprimée', res.data?.data?.message)
+      confirmationVille = false
+      villeASupprimer = null
+      await charger()
+    } catch (e: any) {
+      if (!e.toastAffiche) toast.erreur('Erreur', messageErreur(e, 'Impossible de supprimer'))
     } finally { actionEnCours = '' }
   }
 
@@ -239,7 +259,7 @@
           pour une commande de 10 000 XAF → frais = {fraisFixe.toLocaleString('fr-CM')} XAF →
           total payé par le client = {(10000 + fraisFixe).toLocaleString('fr-CM')} XAF
         </p>
-        <p class="text-xs text-slate-400">Une modification peut prendre jusqu'à 5 minutes pour s'appliquer aux nouvelles commandes.</p>
+        <p class="text-xs text-slate-400">Une modification s'applique immédiatement aux nouvelles commandes.</p>
       </div>
     {/if}
   </div>
@@ -322,6 +342,10 @@
             <span class="text-xs font-semibold px-2.5 py-1 rounded-full {assign.isEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}">
               {assign.isEnabled ? 'Actif' : 'Inactif'}
             </span>
+            <button onclick={() => demanderSuppressionVille(assign)} disabled={actionEnCours === assign.id} title="Supprimer"
+              class="w-8 h-8 rounded-lg hover:bg-red-50 flex items-center justify-center text-slate-400 hover:text-red-500 disabled:opacity-50">
+              <span class="material-symbols-outlined" style="font-size:16px">delete</span>
+            </button>
           </div>
         {/each}
       </div>
@@ -465,6 +489,21 @@
       <button onclick={() => phoneASupprimer && supprimerPhone(phoneASupprimer.id)} disabled={!phoneASupprimer || actionEnCours === phoneASupprimer?.id}
         class="flex-1 px-4 py-2.5 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 disabled:opacity-50">
         {actionEnCours === phoneASupprimer?.id ? '...' : 'Supprimer'}
+      </button>
+    </div>
+  </div>
+</Modal>
+
+<Modal bind:ouvert={confirmationVille} titre="Supprimer cette assignation ?" largeur="sm">
+  <div class="p-6 space-y-4">
+    <p class="text-sm text-slate-600">
+      <span class="font-semibold">{villeASupprimer?.city}</span> n'aura plus d'admin responsable ({nomAdmin(villeASupprimer?.adminUserId ?? null)}).
+    </p>
+    <div class="flex gap-3">
+      <button onclick={() => confirmationVille = false} class="btn-secondary flex-1">Annuler</button>
+      <button onclick={() => villeASupprimer && supprimerVille(villeASupprimer.id)} disabled={!villeASupprimer || actionEnCours === villeASupprimer?.id}
+        class="flex-1 px-4 py-2.5 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 disabled:opacity-50">
+        {actionEnCours === villeASupprimer?.id ? '...' : 'Supprimer'}
       </button>
     </div>
   </div>

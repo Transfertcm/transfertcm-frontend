@@ -27,6 +27,7 @@
   const statuts = $derived([
     { val: '', label: $t('admin.cabins.all_statuses') },
     { val: 'active', label: $t('status.active') },
+    { val: 'paused', label: $t('status.paused') },
     { val: 'suspended', label: $t('status.suspended') },
     { val: 'inactive', label: $t('status.inactive') },
   ])
@@ -42,7 +43,8 @@
     chargement = true
     try {
       const params: any = { page, perPage: 20 }
-      if (filtreStatut) params.status = filtreStatut
+      if (filtreStatut === 'paused') params.paused = 'true'
+      else if (filtreStatut) params.status = filtreStatut
       if (filtreType) params.type = filtreType
       if (filtreVille) params.city = filtreVille
       if (recherche) params.search = recherche

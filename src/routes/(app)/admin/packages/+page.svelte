@@ -2,9 +2,11 @@
   import { onMount } from 'svelte'
   import api from '$lib/api'
   import { toast } from '$lib/stores/toast.svelte'
+  import { auth } from '$lib/stores/auth.svelte'
 
   type Network = 'mtn' | 'orange' | ''
   type PackageType = 'call' | 'data' | 'sms' | 'combo' | 'credit' | ''
+  type Etat = 'actifs' | 'desactives' | 'tous'
 
   interface Package {
     id: string
@@ -14,6 +16,7 @@
     type: string
     description: string | null
     details: Record<string, any>
+    isActive: boolean
     createdAt: string
   }
 
@@ -24,6 +27,9 @@
   // Filtres
   let filtreNetwork  = $state<Network>('')
   let filtreType     = $state<PackageType>('')
+  let filtreEtat     = $state<Etat>('actifs')
+
+  const peutEcrire = $derived(auth.peut('canViewSettings'))
 
   // Modals
   let modalCreer  = $state(false)
@@ -36,7 +42,7 @@
     name: '',
     price: 0,
     network: 'mtn' as 'mtn' | 'orange',
-    type: 'data' as 'call' | 'data' | 'sms' | 'combo',
+    type: 'data' as 'call' | 'data' | 'sms' | 'combo' | 'credit',
     description: '',
   })
 
@@ -65,19 +71,30 @@
 
   const TYPE_LABELS: Record<string, string> = Object.fromEntries(TYPES.filter(t => t.key).map(t => [t.key, t.label]))
 
+  const ETATS: { key: Etat; label: string }[] = [
+    { key: 'actifs',     label: 'Actifs' },
+    { key: 'desactives', label: 'Désactivés' },
+    { key: 'tous',       label: 'Tous' },
+  ]
+
+  const actifs = $derived(packages.filter(p => p.isActive))
+
   const filtered = $derived(packages.filter(p => {
+    if (filtreEtat === 'actifs' && !p.isActive) return false
+    if (filtreEtat === 'desactives' && p.isActive) return false
     if (filtreNetwork && p.network !== filtreNetwork) return false
     if (filtreType && p.type !== filtreType) return false
     return true
   }))
 
-  const countMtn    = $derived(packages.filter(p => p.network === 'mtn').length)
-  const countOrange = $derived(packages.filter(p => p.network === 'orange').length)
+  const countMtn    = $derived(actifs.filter(p => p.network === 'mtn').length)
+  const countOrange = $derived(actifs.filter(p => p.network === 'orange').length)
+  const countDesactives = $derived(packages.length - actifs.length)
 
   async function charger() {
     chargement = true
     try {
-      const res = await api.get('/packages')
+      const res = await api.get('/admin/packages')
       packages = res.data?.data ?? []
     } catch {
       toast.erreur('Erreur', 'Impossible de charger les forfaits')
@@ -97,7 +114,7 @@
       name:        pkg.name,
       price:       pkg.price,
       network:     pkg.network as 'mtn' | 'orange',
-      type:        pkg.type as 'call' | 'data' | 'sms' | 'combo',
+      type:        pkg.type as 'call' | 'data' | 'sms' | 'combo' | 'credit',
       description: pkg.description ?? '',
     }
     modalEditer = true
@@ -138,7 +155,19 @@
       pkgEdite = null
       await charger()
     } catch (err: any) {
-      toast.erreur('Erreur', err.response?.data?.message ?? 'Impossible de modifier')
+      const erreurs = err.response?.data?.errors
+      toast.erreur('Erreur', Array.isArray(erreurs) && erreurs.length ? erreurs.map((x: any) => x.message).join(' • ') : (err.response?.data?.message ?? 'Impossible de modifier'))
+    } finally { enregistrement = false }
+  }
+
+  async function reactiver(pkg: Package) {
+    enregistrement = true
+    try {
+      await api.put(`/packages/${pkg.id}`, { isActive: true })
+      toast.succes('Forfait réactivé')
+      await charger()
+    } catch (err: any) {
+      toast.erreur('Erreur', err.response?.data?.message ?? 'Impossible de réactiver')
     } finally { enregistrement = false }
   }
 
@@ -173,18 +202,21 @@
     <h2 class="font-black text-2xl text-slate-900" style="letter-spacing:-0.02em">Forfaits mobiles</h2>
     <p class="text-sm text-slate-500 mt-0.5">Gérez les forfaits Data, Appels, SMS et Combo disponibles</p>
   </div>
+  {#if peutEcrire}
   <button onclick={ouvrirCreer} class="btn-primary shrink-0">
     <span class="material-symbols-outlined icon-filled" style="font-size:18px">add</span>
     Nouveau forfait
   </button>
+  {/if}
 </div>
 
 <!-- Statistiques rapides -->
-<div class="grid grid-cols-2 md:grid-cols-3 stagger gap-4 mb-5">
+<div class="grid grid-cols-2 md:grid-cols-4 stagger gap-4 mb-5">
   {#each [
-    { label: 'Total actifs', val: packages.length, icon: 'inventory_2', color: 'orange' },
+    { label: 'Total actifs', val: actifs.length, icon: 'inventory_2', color: 'orange' },
     { label: 'MTN actifs',   val: countMtn,    icon: 'cell_tower', color: 'amber' },
     { label: 'Orange actifs',val: countOrange, icon: 'cell_tower', color: 'orange' },
+    { label: 'Désactivés',   val: countDesactives, icon: 'block', color: 'slate' },
   ] as stat}
     <div class="bg-white rounded-2xl border border-slate-100 card-shadow p-4">
       <div class="flex items-center gap-3">
@@ -203,6 +235,21 @@
 <!-- Filtres -->
 <div class="bg-white rounded-2xl border border-slate-100 card-shadow p-4 mb-5">
   <div class="flex flex-wrap gap-3 items-center">
+    <div class="flex items-center gap-1.5">
+      {#each ETATS as e}
+        <button
+          onclick={() => filtreEtat = e.key}
+          class="px-3 py-1.5 rounded-full text-xs font-semibold border transition-all
+            {filtreEtat === e.key
+              ? 'bg-slate-800 text-white border-slate-800'
+              : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'}">
+          {e.label}
+        </button>
+      {/each}
+    </div>
+
+    <div class="w-px h-6 bg-slate-200 mx-1"></div>
+
     <!-- Réseau -->
     <div class="flex items-center gap-1.5">
       {#each NETWORKS as n}
@@ -262,11 +309,13 @@
         <span class="material-symbols-outlined text-slate-400" style="font-size:32px">inventory_2</span>
       </div>
       <p class="text-slate-600 font-semibold">Aucun forfait trouvé</p>
-      <p class="text-sm text-slate-400 mt-1">Modifiez les filtres ou créez un nouveau forfait</p>
+      <p class="text-sm text-slate-400 mt-1">Modifiez les filtres{peutEcrire ? ' ou créez un nouveau forfait' : ''}</p>
+      {#if peutEcrire}
       <button onclick={ouvrirCreer} class="btn-primary mt-4 text-sm">
         <span class="material-symbols-outlined icon-filled" style="font-size:16px">add</span>
         Créer un forfait
       </button>
+      {/if}
     </div>
 
   {:else}
@@ -283,7 +332,7 @@
         </thead>
         <tbody class="divide-y divide-slate-100">
           {#each filtered as pkg}
-            <tr class="hover:bg-slate-50 transition-colors">
+            <tr class="hover:bg-slate-50 transition-colors {pkg.isActive ? '' : 'opacity-60'}">
               <td class="px-6 py-4">
                 <div class="flex items-center gap-3">
                   <div class="w-9 h-9 rounded-xl flex items-center justify-center shrink-0
@@ -295,7 +344,12 @@
                     </span>
                   </div>
                   <div>
-                    <p class="text-sm font-semibold text-slate-900">{pkg.name}</p>
+                    <p class="text-sm font-semibold text-slate-900">
+                      {pkg.name}
+                      {#if !pkg.isActive}
+                        <span class="ml-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200 align-middle">Désactivé</span>
+                      {/if}
+                    </p>
                     {#if pkg.description}
                       <p class="text-xs text-slate-400 mt-0.5 max-w-xs truncate">{pkg.description}</p>
                     {/if}
@@ -321,18 +375,30 @@
               </td>
               <td class="px-6 py-4">
                 <div class="flex items-center justify-end gap-2">
+                  {#if peutEcrire}
                   <button
                     onclick={() => ouvrirEditer(pkg)}
                     title="Modifier"
                     class="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-700 transition-all">
                     <span class="material-symbols-outlined icon-filled" style="font-size:16px">edit</span>
                   </button>
+                  {#if pkg.isActive}
                   <button
                     onclick={() => { pkgAsupprimer = pkg; modalSuppression = true; }}
                     title="Désactiver"
                     class="w-8 h-8 rounded-lg hover:bg-red-50 flex items-center justify-center text-slate-400 hover:text-red-500 transition-all">
                     <span class="material-symbols-outlined icon-filled" style="font-size:16px">block</span>
                   </button>
+                  {:else}
+                  <button
+                    onclick={() => reactiver(pkg)}
+                    disabled={enregistrement}
+                    class="px-2.5 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-semibold hover:bg-emerald-100 flex items-center gap-1 disabled:opacity-50 transition-all">
+                    <span class="material-symbols-outlined icon-filled" style="font-size:14px">replay</span>
+                    Réactiver
+                  </button>
+                  {/if}
+                  {/if}
                 </div>
               </td>
             </tr>
@@ -342,8 +408,8 @@
     </div>
 
     <div class="px-6 py-3 border-t border-slate-100 bg-slate-50 text-xs text-slate-400">
-      {filtered.length} forfait{filtered.length > 1 ? 's' : ''} actif{filtered.length > 1 ? 's' : ''} affiché{filtered.length > 1 ? 's' : ''}
-      {#if filtreNetwork || filtreType} · filtres actifs{/if} · les forfaits désactivés ne sont pas listés
+      {filtered.length} forfait{filtered.length > 1 ? 's' : ''} affiché{filtered.length > 1 ? 's' : ''}
+      {#if filtreNetwork || filtreType} · filtres actifs{/if}
     </div>
   {/if}
 </div>
@@ -383,9 +449,13 @@
               <option value="call">Appels</option>
               <option value="sms">SMS</option>
               <option value="combo">Combo</option>
+              <option value="credit">Crédit</option>
             </select>
           </div>
         </div>
+        {#if form.type === 'credit'}
+          <p class="text-[11px] text-slate-400 -mt-2">Les forfaits de type Crédit ne sont pas encore affichés dans l'application mobile.</p>
+        {/if}
         <div>
           <label for="c-price" class="block text-xs font-semibold text-slate-600 mb-1.5">Prix (FCFA)</label>
           <input id="c-price" type="number" bind:value={form.price} required min="100"
@@ -474,7 +544,7 @@
         <h3 class="font-bold text-slate-900 mb-1">Désactiver ce forfait ?</h3>
         <p class="text-sm text-slate-500">
           Le forfait <strong>{pkgAsupprimer.name}</strong> sera masqué et ne sera plus accessible aux clients.
-          Il disparaîtra aussi de cette liste : sa réactivation n'est pas possible depuis le back-office.
+          Il peut être réactivé à tout moment depuis le filtre « Désactivés ».
         </p>
         <div class="flex gap-3 mt-6">
           <button onclick={() => { modalSuppression = false; pkgAsupprimer = null; }} class="btn-secondary flex-1 justify-center">Annuler</button>

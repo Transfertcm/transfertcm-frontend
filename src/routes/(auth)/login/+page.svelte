@@ -43,7 +43,7 @@
     const authError = sessionStorage.getItem('tcm_auth_error')
     if (authError) {
       sessionStorage.removeItem('tcm_auth_error')
-      toast.erreur('Session expirée', authError)
+      toast.erreur('Vous avez été déconnecté', authError)
     }
   })
 

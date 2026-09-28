@@ -2,6 +2,7 @@
   import { untrack } from 'svelte'
   import api from '$lib/api'
   import { toast } from '$lib/stores/toast.svelte'
+  import { auth } from '$lib/stores/auth.svelte'
 
   let agents = $state<any[]>([])
   let meta = $state<any>(null)
@@ -28,14 +29,7 @@
 
   const libellesStatut: Record<string, string> = { active: 'Actif', inactive: 'Inactif', suspended: 'Suspendu' }
 
-  const agentsFiltres = $derived.by(() => {
-    const q = recherche.trim().toLowerCase()
-    if (!q) return agents
-    return agents.filter((a) =>
-      [a.fullName, a.firstName, a.lastName, a.phone, a.referralCode, a.city, a.neighborhood]
-        .some((v) => String(v ?? '').toLowerCase().includes(q))
-    )
-  })
+  const peutGerer = $derived(auth.peut('canViewPromoAgents'))
 
   function formaterDate(d: string | null) {
     if (!d) return '—'
@@ -56,6 +50,7 @@
       const params: any = { page, per_page: 20 }
       if (filtreStatut) params.status = filtreStatut
       if (filtreVille) params.city = filtreVille
+      if (recherche.trim()) params.search = recherche.trim()
       const res = await api.get('/admin/promo-agents', { params })
       agents = res.data?.data ?? []
       meta = res.data?.meta ?? null
@@ -85,7 +80,11 @@
     erreurs = {}
     creation = true
     try {
-      await api.post('/admin/promo-agents', form)
+      const payload: Record<string, string> = { firstName: form.firstName, lastName: form.lastName, phone: form.phone, idType: form.idType }
+      for (const cle of ['city', 'neighborhood', 'idNumber'] as const) {
+        if (form[cle].trim()) payload[cle] = form[cle].trim()
+      }
+      await api.post('/admin/promo-agents', payload)
       toast.succes('Agent créé', `Code de parrainage généré automatiquement`)
       afficherModalCreer = false
       form = { firstName: '', lastName: '', phone: '', city: '', neighborhood: '', idNumber: '', idType: 'CNI' }
@@ -94,13 +93,13 @@
       if (e.response?.status === 422) {
         e.response.data?.errors?.forEach((err: any) => { erreurs[err.field] = err.message })
       } else {
-        toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de créer')
+        if (!e.toastAffiche) toast.erreur('Erreur', e.response?.data?.message ?? 'Impossible de créer')
       }
     } finally { creation = false }
   }
 
   let timer: ReturnType<typeof setTimeout>
-  function surFiltreVille() {
+  function surSaisie() {
     clearTimeout(timer)
     timer = setTimeout(() => { page = 1; charger() }, 400)
   }
@@ -115,10 +114,12 @@
     <h2 class="font-black text-2xl text-slate-900" style="letter-spacing:-0.02em">Agents promoteurs</h2>
     <p class="text-sm text-slate-500 mt-0.5">{meta ? `${meta.total ?? 0} agent(s)` : 'Gestion des agents de terrain'}</p>
   </div>
-  <button onclick={() => afficherModalCreer = true} class="btn-primary">
-    <span class="material-symbols-outlined icon-filled" style="font-size:18px">person_add</span>
-    Nouvel agent
-  </button>
+  {#if peutGerer}
+    <button onclick={() => afficherModalCreer = true} class="btn-primary">
+      <span class="material-symbols-outlined icon-filled" style="font-size:18px">person_add</span>
+      Nouvel agent
+    </button>
+  {/if}
 </div>
 
 <!-- Filtres -->
@@ -126,7 +127,7 @@
   <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
     <div class="relative">
       <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" style="font-size:16px">search</span>
-      <input type="text" placeholder="Rechercher (nom, téléphone, code)..." bind:value={recherche}
+      <input type="text" placeholder="Rechercher (nom, téléphone, code)..." bind:value={recherche} oninput={surSaisie}
         class="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
     </div>
     <select bind:value={filtreStatut} class="px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
@@ -135,7 +136,7 @@
       <option value="inactive">Inactif</option>
       <option value="suspended">Suspendu</option>
     </select>
-    <input type="text" placeholder="Filtrer par ville..." bind:value={filtreVille} oninput={surFiltreVille}
+    <input type="text" placeholder="Filtrer par ville..." bind:value={filtreVille} oninput={surSaisie}
       class="px-3 py-2.5 rounded-xl border border-slate-200 text-sm" />
   </div>
 </div>
@@ -145,7 +146,7 @@
   <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
     {#each Array(6) as _}<div class="skeleton h-40 rounded-2xl"></div>{/each}
   </div>
-{:else if agentsFiltres.length === 0}
+{:else if agents.length === 0}
   <div class="bg-white rounded-2xl border border-slate-100 card-shadow py-20 text-center">
     <div class="w-14 h-14 rounded-2xl bg-orange-50 flex items-center justify-center mx-auto mb-4">
       <span class="material-symbols-outlined text-orange-400 icon-filled" style="font-size:28px">groups</span>
@@ -154,7 +155,7 @@
   </div>
 {:else}
   <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-    {#each agentsFiltres as agent}
+    {#each agents as agent}
       <button onclick={() => voirDetail(agent)}
         class="bg-white rounded-2xl border border-slate-100 card-shadow p-5 text-left hover:border-orange-200 transition-all group">
         <div class="flex items-start gap-3 mb-4">
@@ -187,6 +188,14 @@
           <div>
             <p class="text-slate-400 mb-0.5">Inscrit le</p>
             <p class="font-semibold text-slate-700">{formaterDate(agent.createdAt)}</p>
+          </div>
+          <div>
+            <p class="text-slate-400 mb-0.5">Parrainages</p>
+            <p class="font-semibold text-slate-700">{agent.totalReferrals ?? 0}</p>
+          </div>
+          <div>
+            <p class="text-slate-400 mb-0.5">Commandes</p>
+            <p class="font-semibold text-slate-700">{agent.totalOrders ?? 0}</p>
           </div>
         </div>
       </button>
@@ -231,6 +240,7 @@
             ['Ville', agentSelectionne.city],
             ['Quartier', agentSelectionne.neighborhood],
             ['Type pièce', agentSelectionne.idType],
+            ['Numéro de pièce', agentSelectionne.idNumber],
             ['Statut', libellesStatut[agentSelectionne.status]],
             ['Inscrit le', formaterDate(agentSelectionne.createdAt)],
           ] as [label, val]}

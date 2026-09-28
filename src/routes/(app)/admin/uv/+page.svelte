@@ -157,6 +157,12 @@
 
   onMount(chargerCabines)
 
+  const libellesType: Record<string, string> = {
+    recharge: 'Recharge',
+    deduction: 'Déduction',
+    adjustment: 'Ajustement',
+  }
+
   const couleurType: Record<string, string> = {
     recharge: 'text-emerald-600 bg-emerald-50',
     deduction: 'text-red-600 bg-red-50',
@@ -345,14 +351,17 @@
               </span>
             </div>
             <div class="flex-1 min-w-0">
-              <p class="text-sm font-semibold text-slate-800">{tx.description ?? tx.transactionType ?? '—'}</p>
+              <p class="text-sm font-semibold text-slate-800">{tx.cabinName ?? nomsCabines[tx.cabinId] ?? '—'}</p>
+              <p class="text-xs text-slate-500">{tx.description ?? libellesType[tx.transactionType] ?? '—'}</p>
               <p class="text-xs text-slate-400">{formaterDate(tx.createdAt)}</p>
             </div>
             <div class="text-right shrink-0">
               <p class="text-sm font-bold {tx.transactionType === 'recharge' ? 'text-emerald-600' : 'text-red-600'}">
                 {tx.transactionType === 'recharge' ? '+' : '-'}{tx.amount ?? 0} UV
               </p>
-              {#if tx.balanceAfter !== null && tx.balanceAfter !== undefined}
+              {#if tx.balanceBefore !== null && tx.balanceBefore !== undefined && tx.balanceAfter !== null && tx.balanceAfter !== undefined}
+                <p class="text-xs text-slate-400">{tx.balanceBefore} → {tx.balanceAfter} UV</p>
+              {:else if tx.balanceAfter !== null && tx.balanceAfter !== undefined}
                 <p class="text-xs text-slate-400">{tx.balanceAfter} UV {$t('admin.uv.remaining')}</p>
               {/if}
             </div>
@@ -434,7 +443,7 @@
           <select id="sim-card-id" bind:value={simCardId} class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm">
             <option value="">{$t('admin.uv.no_specific_sim')}</option>
             {#each simCardsValidation as sim}
-              <option value={sim.id}>{sim.cardName} — {sim.phoneNumber}</option>
+              <option value={sim.id}>{sim.cardName} — {sim.phoneNumber} ({sim.currentBalance ?? 0} UV)</option>
             {/each}
           </select>
         </div>

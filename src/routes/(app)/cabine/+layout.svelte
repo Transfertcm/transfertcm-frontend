@@ -90,7 +90,7 @@
   const largeurSidebar = $derived(reduit ? 64 : 240)
 </script>
 
-<div class="flex h-screen overflow-hidden bg-slate-50">
+<div class="flex h-screen overflow-hidden bg-slate-50" data-clarity-mask="True">
 
   <!-- ── Sidebar (fixe) ── -->
   <aside

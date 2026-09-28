@@ -33,7 +33,7 @@
   const largeurSidebar = $derived(reduit ? 64 : 240)
 </script>
 
-<div class="flex h-screen overflow-hidden bg-slate-50" id="app-layout">
+<div class="flex h-screen overflow-hidden bg-slate-50" id="app-layout" data-clarity-mask="True">
   <Sidebar bind:reduit />
 
   {#if estMobile && !reduit}
